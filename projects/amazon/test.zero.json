@@ -1,0 +1,73 @@
+[
+  {
+    "action": "navigate",
+    "url": "https://www.amazon.in/"
+  },
+  {
+    "action": "click",
+    "selector": "#twotabsearchtextbox"
+  },
+  {
+    "action": "type",
+    "selector": "#twotabsearchtextbox",
+    "text": "Samsung "
+  },
+  {
+    "action": "click",
+    "selector": "[aria-label=\"samsung s24 ultra 5g mobile\"]"
+  },
+  {
+    "action": "navigate",
+    "url": "https://www.amazon.in/s?k=samsung%20s24%20ultra%205g%20mobile&i=aps&ref=nb_sb_ss_mvt-t11-ranker_1_8&crid=2LP3JDVEDSI99&sprefix=Samsung%20%2Caps%2C254"
+  },
+  {
+    "action": "navigate",
+    "url": "https://www.amazon.in/s?k=samsung+s24+ultra+5g+mobile&crid=2LP3JDVEDSI99&sprefix=Samsung+%2Caps%2C254&ref=nb_sb_ss_mvt-t11-ranker_1_8"
+  },
+  {
+    "action": "assertText",
+    "selector": "text=\"SponsoredSponsored You are seeing this ad based on\"",
+    "expected": "SponsoredSponsored You are seeing this ad based on the product’s relevance to your search query.Let us know  Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery Life 4.34.3 out of 5 stars (468)  Price, product page₹1,41,999₹1,41,999Flat INR 9000 Off on HDFC BankCardsFlat INR 9000 Off on HDFC BankCardsFREE delivery Mon, 1 DecOr fastest delivery Tomorrow, 30 NovAdd to cart+4 other colors/patterns"
+  },
+  {
+    "action": "assertText",
+    "selector": "text=\"Samsung Galaxy S25 Ultra 5G AI Smartphone (Titaniu\"",
+    "expected": "Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery Life"
+  },
+  {
+    "action": "scroll",
+    "selector": ""
+  },
+  {
+    "action": "click",
+    "selector": "#a-autoid-1-announce"
+  },
+  {
+    "action": "scroll",
+    "selector": ""
+  },
+  {
+    "action": "click",
+    "selector": "text=\"Go to Cart\""
+  },
+  {
+    "action": "navigate",
+    "url": "https://www.amazon.in/cart?ref_=ox_ewc_ret_gtc_dsk_in"
+  },
+  {
+    "action": "assertText",
+    "selector": "a.a-link-normal.sc-product-link.sc-product-title.aok-block",
+    "expected": "Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery LifeSamsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included,…\n                \n            \n            \n        \n    \n\n\n    \n    \n        \n            \n            Opens in a new tab"
+  },
+  {
+    "action": "click",
+    "selector": "[name=\"proceedToRetailCheckout\"]"
+  },
+  {
+    "action": "navigate",
+    "url": "https://www.amazon.in/ap/signin?openid.pape.max_auth_age=900&openid.return_to=https%3A%2F%2Fwww.amazon.in%2Fcheckout%2Fentry%2Fcart%3FisEligibilityLogicDisabled%3D1%26referrer%3Dcart%26proceedToCheckout%3D1%26proceedToCheckout%3D1%26ref_%3Dox_sc_proceed%26oldCustomerId%3D0%26tangoWeblabStatus%3Dtango_enable_unrec_customer%26sessionID%3D523-3934417-3163567%26pipelineType%3DChewbacca%26isToBeGiftWrappedBefore%3D0%26useDefaultCart%3D1%26isUnrec%3D1&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=amazon_checkout_in&openid.mode=checkid_setup&language=en_IN&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0"
+  },
+  {
+    "action": "close"
+  }
+]

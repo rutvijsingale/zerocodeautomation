@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Zero‑Code Automation IDE</title>
+  <link rel="stylesheet" href="/styles.css"/>
+</head>
+<body>
+  <header>
+    <h1 id="app-title">🚀 Zero‑Code Automation IDE</h1>
+    <div id="app-meta"></div>
+  </header>
+
+  <!-- Full-screen recording overlay -->
+  <div id="recordingOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100vh; background: var(--bg); z-index: 1000; overflow-y: auto;">
+    <div style="position: sticky; top: 0; background: rgba(22, 27, 34, 0.98); backdrop-filter: blur(20px); padding: 20px 40px; border-bottom: 2px solid var(--border); z-index: 1001; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <h2 style="margin: 0; font-size: 24px; font-weight: 700; color: var(--text);">🎬 Recording Session</h2>
+        <span id="recordingOverlayStatus" style="color: var(--muted); font-size: 14px; padding: 6px 12px; background: rgba(15, 21, 34, 0.4); border-radius: 6px; border: 1px solid var(--border);">
+          <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%; margin-right: 8px; animation: pulse 1s ease-in-out infinite;"></span>
+          Recording...
+        </span>
+      </div>
+      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+        <button id="stopRecordingOverlay" style="background: linear-gradient(135deg, var(--danger) 0%, #ff8787 100%); padding: 10px 20px; border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: 600; font-size: 14px;">⏹ Stop Recording</button>
+        <button id="pauseRecordingOverlay" style="background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%); padding: 10px 20px; border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: 600; font-size: 14px;">⏸ Pause</button>
+        <button id="revertChangesBtn" style="display: none; background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); padding: 10px 20px; border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: 600; font-size: 14px;">↩️ Revert Changes</button>
+      </div>
+    </div>
+    <div style="padding: 40px; max-width: 1920px; margin: 0 auto;">
+      <!-- Gherkin Section -->
+      <div style="margin-bottom: 40px; background: linear-gradient(135deg, rgba(22, 27, 34, 0.95) 0%, rgba(13, 17, 23, 0.98) 100%); border: 1px solid var(--border); border-radius: 20px; padding: 40px; box-shadow: var(--shadow-md);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <h3 style="font-size: 20px; margin: 0; color: var(--text); font-weight: 600;">🥒 Gherkin Feature <span id="live-feature-badge-overlay" style="display: none; margin-left: 8px; padding: 2px 8px; background: rgba(16, 185, 129, 0.2); border-radius: 4px; font-size: 11px; color: #10b981;">● LIVE</span></h3>
+          <div style="display: flex; gap: 8px;">
+            <button id="copyFeatureBtnOverlay" style="padding: 8px 16px; font-size: 13px; background: rgba(90, 169, 255, 0.2); border: 1px solid rgba(90, 169, 255, 0.4); border-radius: 6px; color: #5aa9ff; cursor: pointer;">📋 Copy</button>
+            <button id="saveFeatureBtnOverlay" style="display: none; padding: 8px 16px; font-size: 13px; background: linear-gradient(135deg, #10b981 0%, #34d399 100%); border: none; border-radius: 6px; color: white; cursor: pointer;">💾 Save</button>
+          </div>
+        </div>
+        <textarea id="code-feature-overlay" class="codeblock-editable" spellcheck="false" style="font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.6; tab-size: 2; width: 100%; min-height: 400px; resize: vertical; background: rgba(13, 17, 23, 0.6); color: #e6edf3; border: 1px solid var(--border); border-radius: 8px; padding: 20px; white-space: pre; overflow-wrap: normal; overflow-x: auto;"></textarea>
+        <div id="featureSaveStatusOverlay" style="margin-top: 8px; font-size: 12px;"></div>
+      </div>
+      
+      <!-- Step Definitions Section -->
+      <div style="background: linear-gradient(135deg, rgba(22, 27, 34, 0.95) 0%, rgba(13, 17, 23, 0.98) 100%); border: 1px solid var(--border); border-radius: 20px; padding: 40px; box-shadow: var(--shadow-md);">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+          <h3 style="font-size: 20px; margin: 0; color: var(--text); font-weight: 600;">🔧 Step Definitions</h3>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <button id="copyStepsBtnOverlay" style="padding: 8px 16px; font-size: 13px; background: rgba(90, 169, 255, 0.2); border: 1px solid rgba(90, 169, 255, 0.4); border-radius: 6px; color: #5aa9ff; cursor: pointer;">📋 Copy</button>
+            <button id="saveStepsBtnOverlay" style="display: none; padding: 8px 16px; font-size: 13px; background: linear-gradient(135deg, #10b981 0%, #34d399 100%); border: none; border-radius: 6px; color: white; cursor: pointer;">💾 Save</button>
+          </div>
+        </div>
+        <textarea id="code-steps-overlay" class="codeblock-editable" spellcheck="false" style="font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.6; tab-size: 2; width: 100%; min-height: 400px; resize: vertical; background: rgba(13, 17, 23, 0.6); color: #e6edf3; border: 1px solid var(--border); border-radius: 8px; padding: 20px; white-space: pre; overflow-wrap: normal; overflow-x: auto;"></textarea>
+        <div id="stepsSaveStatusOverlay" style="margin-top: 8px; font-size: 12px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Project Selector -->
+  <div style="background: linear-gradient(135deg, rgba(22, 27, 34, 0.95) 0%, rgba(13, 17, 23, 0.98) 100%); border-bottom: 2px solid var(--border); padding: 16px 24px; margin-bottom: 24px;">
+    <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; max-width: 1920px; margin: 0 auto;">
+      <label style="display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; font-size: 14px;">
+        <span>📁 Project:</span>
+        <select id="project-dropdown" style="padding: 8px 16px; border-radius: 8px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 14px; min-width: 200px; cursor: pointer;">
+          <option value="">-- Select Project --</option>
+        </select>
+      </label>
+      <button id="new-project-btn" style="padding: 8px 16px; font-size: 14px; background: linear-gradient(135deg, #6b7280 0%, #9ca3af 100%); border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: 600;" title="Optional: Create project manually (projects are auto-created from form when recording stops)">➕ New Project (Optional)</button>
+      <button id="save-project-btn" style="display: none; padding: 8px 16px; font-size: 14px; background: linear-gradient(135deg, #5aa9ff 0%, #7bb3ff 100%); border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: 600;">💾 Save Project</button>
+      <button id="delete-project-btn" style="display: none; padding: 8px 16px; font-size: 14px; background: linear-gradient(135deg, #ef4444 0%, #f87171 100%); border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: 600;">🗑️ Delete Project</button>
+      <button id="clear-project-btn" style="padding: 8px 16px; font-size: 14px; background: linear-gradient(135deg, #6b7280 0%, #9ca3af 100%); border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: 600;">🗑️ Clear</button>
+      <span id="project-status" style="color: var(--muted); font-size: 12px; margin-left: auto;"></span>
+    </div>
+  </div>
+
+  <main class="grid">
+    <section class="panel">
+      <h2>📝 Step Builder</h2>
+      <div class="controls">
+        <label>
+          Framework Selection
+          <select id="framework" style="width: 100%; padding: 10px; border-radius: 8px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 14px;">
+            <option value="playwright-java">Playwright + Java + Cucumber</option>
+            <option value="selenium-java">Selenium WebDriver + Java + Cucumber</option>
+          </select>
+          <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 4px;">
+            Choose your automation framework for code generation
+          </small>
+        </label>
+        <label>
+          Browser Selection (for Code Generation)
+          <select id="browserType" style="width: 100%; padding: 10px; border-radius: 8px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 14px;">
+            <option value="chromium">🌐 Chrome</option>
+            <option value="firefox">🦊 Firefox</option>
+            <option value="webkit">🧭 WebKit (Safari)</option>
+            <option value="edge">🔷 Microsoft Edge</option>
+          </select>
+          <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 4px;">
+            Select browser for code generation
+          </small>
+        </label>
+        <label>
+          Project Name 
+          <input id="projectName" placeholder="my-project"/>
+          <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 4px;">
+            💡 Project will be auto-created from this name when you stop recording. Or use "New Project" button to create manually.
+          </small>
+        </label>
+        <label>Base URL (leave blank for blank browser) <input id="baseUrl" placeholder="Leave blank to start with blank browser"/></label>
+        <label>Feature Title <input id="featureTitle" placeholder="Recorded Flow"/></label>
+        <label>Feature Name <input id="featureName" placeholder="Recorded Feature"/></label>
+        <label>Tags (space-separated) <input id="tags" placeholder="@smoke @regression"/></label>
+        
+        <!-- Advanced Cucumber BDD Features -->
+        <div style="margin-top: 28px; padding: 24px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.12) 0%, rgba(88, 166, 255, 0.08) 100%); border-radius: 16px; border: 1.5px solid rgba(139, 92, 246, 0.3); backdrop-filter: blur(10px); transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(139, 92, 246, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.08);">
+          <h3 style="margin: 0 0 20px 0; font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: 0.3px; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">🥒</span>
+            <span>Advanced Cucumber Features</span>
+          </h3>
+          
+          <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; cursor: pointer;">
+            <input type="checkbox" id="useScenarioOutline" style="width: auto; cursor: pointer;"/>
+            <span>Use Scenario Outline (for data-driven testing)</span>
+          </label>
+          
+          <div id="examplesContainer" style="display: none; margin-top: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <label style="font-size: 12px; color: var(--muted); display: block;">
+                Examples Table (JSON format - one object per row):
+              </label>
+              <div style="display: flex; gap: 6px;">
+                <button id="loadTestDataSet" style="padding: 4px 10px; font-size: 11px; background: rgba(90, 169, 255, 0.2); border: 1px solid rgba(90, 169, 255, 0.4); border-radius: 4px; color: #5aa9ff; cursor: pointer;">📥 Load</button>
+                <button id="saveTestDataSet" style="padding: 4px 10px; font-size: 11px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 4px; color: #10b981; cursor: pointer;">💾 Save</button>
+              </div>
+            </div>
+            <textarea id="examplesTable" placeholder='[{"username": "admin", "password": "admin123"}, {"username": "user", "password": "user123"}]' style="width: 100%; min-height: 90px; padding: 12px; border-radius: 8px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-family: 'SF Mono', 'Monaco', monospace; font-size: 12px; resize: vertical; transition: all 0.3s ease; line-height: 1.6;"></textarea>
+            <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 4px;">
+              💡 Auto-detected when same selector has multiple values. Or provide manually as JSON array.
+              <br>
+              <strong style="color: var(--accent);">✨ Updates automatically:</strong> Changing examples updates steps and Gherkin in real-time!
+            </small>
+            <div id="examplesUpdateStatus" style="display: none; margin-top: 6px; padding: 6px 10px; background: rgba(139, 92, 246, 0.2); border: 1px solid #8b5cf6; border-radius: 4px; font-size: 11px; color: #a78bfa;">
+              ✅ Steps and Gherkin updated with placeholders
+            </div>
+          </div>
+          
+          <label style="display: flex; align-items: center; gap: 8px; margin-top: 12px; cursor: pointer;">
+            <input type="checkbox" id="markAsBackground" style="width: auto; cursor: pointer;"/>
+            <span>Mark next steps as Background (shared setup)</span>
+          </label>
+          
+          <label style="display: flex; align-items: center; gap: 8px; margin-top: 12px; cursor: pointer;">
+            <input type="checkbox" id="createNewScenario" style="width: auto; cursor: pointer;"/>
+            <span>Create new scenario after current steps</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="step-form">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+          <input id="pageName" placeholder="Page Name (e.g., LoginPage, ProductPage)" style="font-size: 13px;"/>
+          <input id="elementName" placeholder="Element Name (e.g., LoginButton, SearchField)" style="font-size: 13px;"/>
+        </div>
+        <select id="stepKind">
+          <option value="navigate">Navigate</option>
+          <option value="click">Click</option>
+          <option value="type">Type</option>
+          <option value="assertText">Assert Text Contains</option>
+          <option value="assertVisible">Assert Visible</option>
+          <option value="assertNotVisible">Assert Not Visible</option>
+          <option value="assertAttribute">Assert Attribute</option>
+          <option value="assertCount">Assert Count</option>
+          <option value="assertValue">Assert Value</option>
+          <option value="assertEnabled">Assert Enabled</option>
+          <option value="assertDisabled">Assert Disabled</option>
+          <option value="assertChecked">Assert Checked</option>
+          <option value="assertNotChecked">Assert Not Checked</option>
+          <option value="waitFor">Wait</option>
+          <option value="waitForSelector">Wait For Selector</option>
+          <option value="screenshot">Take Screenshot</option>
+          <option value="apiCall">API Call</option>
+        </select>
+        <input id="selector" placeholder="css/xpath/role (e.g., text=Login or #username)"/>
+        <input id="value" placeholder="Value/Text/URL/Attribute Name"/>
+        <input id="expectedValue" placeholder="Expected Value (for assertions)" style="display:none;"/>
+        <select id="assertionType" style="display:none;">
+          <option value="equals">Equals</option>
+          <option value="contains">Contains</option>
+          <option value="startsWith">Starts With</option>
+          <option value="endsWith">Ends With</option>
+          <option value="regex">Regex Match</option>
+        </select>
+        <select id="method">
+          <option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option>
+        </select>
+        <button id="addStep">➕ Add Step</button>
+        <button id="saveLocator" style="background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); margin-top: 8px;">💾 Save Locator to Repository</button>
+      </div>
+      
+      <!-- Locator Repository Panel -->
+      <div id="locatorRepositoryPanel" style="margin-top: 24px; padding: 16px; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--text);">📚 Locator Repository</h3>
+          <button id="toggleLocatorPanel" style="padding: 4px 12px; font-size: 12px; background: rgba(139, 92, 246, 0.2); border: 1px solid rgba(139, 92, 246, 0.4); border-radius: 6px; color: #a78bfa; cursor: pointer;">Hide</button>
+        </div>
+        <div id="locatorList" style="max-height: 300px; overflow-y: auto; margin-bottom: 12px;"></div>
+        <div style="display: flex; gap: 8px;">
+          <button id="loadLocator" style="padding: 6px 12px; font-size: 12px; background: rgba(90, 169, 255, 0.2); border: 1px solid rgba(90, 169, 255, 0.4); border-radius: 6px; color: #5aa9ff; cursor: pointer;">📥 Load Selected</button>
+          <button id="deleteLocator" style="padding: 6px 12px; font-size: 12px; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 6px; color: #f87171; cursor: pointer;">🗑️ Delete Selected</button>
+        </div>
+      </div>
+
+      <div class="steps-container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+          <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--text);">
+            📋 Recorded Steps & Assertions 
+            <span id="stepCount" style="color: var(--accent); font-weight: 700;">0</span>
+          </h3>
+        </div>
+        <ol id="stepsList" style="list-style: none; padding: 0; max-height: 400px; overflow-y: auto; margin: 0;"></ol>
+      </div>
+      <div class="actions">
+        <button id="clearSteps" class="danger">🗑️ Clear All (Steps, Scenarios & Forms)</button>
+        <button id="exportSteps" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%);">📥 Export Steps JSON</button>
+        <button id="generateTestCases" style="background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);">✨ Generate Test Cases</button>
+        <button id="saveAsFlow" style="background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);">💾 Save Steps as Flow</button>
+        <button id="insertFlow" style="background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);">📋 Insert Flow</button>
+      </div>
+      
+      <!-- Reusable Flows Panel -->
+      <div id="flowsPanel" style="margin-top: 24px; padding: 16px; background: rgba(236, 72, 153, 0.1); border: 1px solid rgba(236, 72, 153, 0.3); border-radius: 8px; display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--text);">🔄 Reusable Flows</h3>
+          <button id="toggleFlowsPanel" style="padding: 4px 12px; font-size: 12px; background: rgba(236, 72, 153, 0.2); border: 1px solid rgba(236, 72, 153, 0.4); border-radius: 6px; color: #f472b6; cursor: pointer;">Hide</button>
+        </div>
+        <div id="flowsList" style="max-height: 300px; overflow-y: auto; margin-bottom: 12px;"></div>
+        <div style="display: flex; gap: 8px;">
+          <button id="insertSelectedFlow" style="padding: 6px 12px; font-size: 12px; background: rgba(90, 169, 255, 0.2); border: 1px solid rgba(90, 169, 255, 0.4); border-radius: 6px; color: #5aa9ff; cursor: pointer;">📋 Insert Selected</button>
+          <button id="deleteSelectedFlow" style="padding: 6px 12px; font-size: 12px; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 6px; color: #f87171; cursor: pointer;">🗑️ Delete Selected</button>
+        </div>
+      </div>
+      
+      <!-- Test Cases Results Section -->
+      <div id="testCasesResults" style="display: none; margin-top: 24px; padding: 24px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(167, 139, 250, 0.1) 100%); border: 2px solid rgba(139, 92, 246, 0.3); border-radius: 12px;">
+        <h3 style="font-size: 18px; margin: 0 0 16px 0; color: var(--text); font-weight: 600;">📋 Generated Test Cases</h3>
+        <div id="testCasesSummary" style="margin-bottom: 16px; padding: 12px; background: rgba(13, 17, 23, 0.6); border-radius: 8px; font-size: 13px;"></div>
+        <div id="testCasesList" style="max-height: 400px; overflow-y: auto; margin-bottom: 16px;"></div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button id="copyTestCasesFeature" style="padding: 8px 16px; font-size: 13px; background: rgba(90, 169, 255, 0.2); border: 1px solid rgba(90, 169, 255, 0.4); border-radius: 6px; color: #5aa9ff; cursor: pointer;">📋 Copy Feature File</button>
+          <button id="applyTestCasesFeature" style="padding: 8px 16px; font-size: 13px; background: linear-gradient(135deg, #10b981 0%, #34d399 100%); border: none; border-radius: 6px; color: white; cursor: pointer;">✅ Apply to Feature File</button>
+        </div>
+      </div>
+
+      <h2 style="margin-top: 32px; padding-top: 32px; border-top: 2px solid var(--border);">🎬 Browser Recording</h2>
+      <p style="font-size: 14px; color: var(--text-secondary); margin: 12px 0 20px 0; line-height: 1.8;">
+        Record your interactions with a real browser. A new browser window will open where you can click, type, and navigate. 
+        All actions will be automatically captured as steps and displayed in real-time in the Generated Code section.
+        <strong style="color: var(--accent); display: block; margin-top: 12px; font-size: 15px; padding: 12px 16px; background: rgba(88, 166, 255, 0.1); border-left: 3px solid var(--accent); border-radius: 6px;">💡 Code updates live as you record!</strong>
+        <strong style="color: #10b981; display: block; margin-top: 12px; font-size: 14px; padding: 10px 14px; background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10b981; border-radius: 6px;">✨ Approval Required: Fill in the form above (Project Name, Feature Title, etc.) and start recording. After stopping, review and approve the recording to create the project and save steps!</strong>
+      </p>
+      <div class="recording-controls" style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0;">
+        <button id="startRecording" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">🎬 Start Recording</button>
+        <button id="stopRecording" disabled style="background: linear-gradient(135deg, var(--danger) 0%, #ff8787 100%);">⏹ Stop Recording</button>
+        <button id="pauseRecording" disabled style="background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);">⏸ Pause</button>
+        <span id="recordingStatus" style="color: var(--muted); font-size: 13px; padding: 8px 12px; background: rgba(15, 21, 34, 0.4); border-radius: 6px; border: 1px solid var(--border); flex: 1; min-width: 200px;">
+          <span style="display: inline-block; margin-right: 8px;">●</span>
+          Ready to record
+        </span>
+      </div>
+      
+      <div style="margin-top: 24px; padding-top: 24px; border-top: 2px solid var(--border);">
+        <h3 style="font-size: 16px; margin: 0 0 16px 0; color: var(--text); font-weight: 700; display: flex; align-items: center; gap: 10px; letter-spacing: 0.2px;">
+          <span style="font-size: 20px;">▶️</span>
+          <span>Execute Script</span>
+        </h3>
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
+          <button id="rerunScript" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%); padding: 12px 24px; font-size: 14px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">▶️ Rerun Script</button>
+          <button id="runTestRunner" style="background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); padding: 12px 24px; font-size: 14px; box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);">🧪 Run as Test Runner (Gherkin → Step Defs)</button>
+          <button id="stopRerunScript" style="display: none; background: linear-gradient(135deg, #ef4444 0%, #f87171 100%); padding: 12px 24px; font-size: 14px; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);">⏹️ Stop Execution</button>
+        </div>
+        <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 12px; background: rgba(15, 21, 34, 0.4); border-radius: 6px; border: 1px solid var(--border);">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text); font-size: 13px;">
+            <input type="checkbox" id="stopOnFailure" style="width: 16px; height: 16px; cursor: pointer; accent-color: #f59e0b;">
+            <span>🛑 Stop on First Failure</span>
+          </label>
+          <small style="color: var(--muted); font-size: 11px; margin-left: 8px;">
+            When enabled, execution will stop immediately when a step fails. When disabled, execution continues through all steps.
+          </small>
+        </div>
+        <div id="rerunStatus" style="display: none; margin-top: 8px; padding: 12px; background: rgba(15, 21, 34, 0.6); border-radius: 6px; border: 1px solid var(--border);">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span id="rerunStatusIcon">⏳</span>
+            <span id="rerunStatusText">Executing...</span>
+          </div>
+          <div id="rerunProgress" style="font-size: 12px; color: var(--muted);"></div>
+          <div id="rerunResults" style="margin-top: 8px; font-size: 12px;"></div>
+        </div>
+        <div id="testRunnerStatus" style="display: none; margin-top: 8px; padding: 12px; background: rgba(15, 21, 34, 0.6); border-radius: 6px; border: 1px solid var(--border);">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span id="testRunnerStatusIcon">⏳</span>
+            <span id="testRunnerStatusText">Running tests...</span>
+          </div>
+          <div id="testRunnerProgress" style="font-size: 12px; color: var(--muted); margin-bottom: 8px;"></div>
+          <div id="testRunnerOutput" style="font-size: 11px; color: var(--text); font-family: monospace; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;"></div>
+          <div id="testRunnerResults" style="margin-top: 8px; font-size: 12px;"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>⚡ Generated Code</h2>
+      <div style="margin-bottom: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3 style="font-size: 16px; margin: 0; color: var(--text-secondary); font-weight: 600;">☕ Selenium Java</h3>
+          <div style="display: flex; gap: 8px;">
+            <button id="copySeleniumBtn" style="padding: 6px 12px; font-size: 12px; background: rgba(90, 169, 255, 0.2); border: 1px solid rgba(90, 169, 255, 0.4); border-radius: 6px; color: #5aa9ff; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s;">
+              <span id="copySeleniumIcon">📋</span>
+              <span id="copySeleniumText">Copy</span>
+            </button>
+            <button id="saveSeleniumBtn" style="display: none; padding: 6px 12px; font-size: 12px; background: linear-gradient(135deg, #10b981 0%, #34d399 100%); border: none; border-radius: 6px; color: white; cursor: pointer;">💾 Save</button>
+          </div>
+        </div>
+        <textarea id="code-selenium" class="codeblock-editable" spellcheck="false" style="font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.5; tab-size: 2; width: 100%; min-height: 300px; resize: vertical; background: rgba(13, 17, 23, 0.6); color: #e6edf3; border: 1px solid var(--border); border-radius: 8px; padding: 16px; white-space: pre; overflow-wrap: normal; overflow-x: auto;"></textarea>
+        <div id="seleniumSaveStatus" style="margin-top: 8px; font-size: 12px;"></div>
+      </div>
+
+      <div style="margin-bottom: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3 style="font-size: 16px; margin: 0; color: var(--text-secondary); font-weight: 600;">🥒 Gherkin Feature <span id="live-feature-badge" style="display: none; margin-left: 8px; padding: 2px 8px; background: rgba(16, 185, 129, 0.2); border-radius: 4px; font-size: 11px; color: #10b981;">● LIVE</span></h3>
+          <div style="display: flex; gap: 8px;">
+            <button id="copyFeatureBtn" style="padding: 6px 12px; font-size: 12px; background: rgba(90, 169, 255, 0.2); border: 1px solid rgba(90, 169, 255, 0.4); border-radius: 6px; color: #5aa9ff; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s;">
+              <span id="copyFeatureIcon">📋</span>
+              <span id="copyFeatureText">Copy</span>
+            </button>
+            <button id="saveFeatureBtn" style="display: none; padding: 6px 12px; font-size: 12px; background: linear-gradient(135deg, #10b981 0%, #34d399 100%); border: none; border-radius: 6px; color: white; cursor: pointer;">💾 Save Changes</button>
+        </div>
+        </div>
+        <textarea id="code-feature" class="codeblock-editable" spellcheck="false" style="font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.5; tab-size: 2; width: 100%; min-height: 300px; resize: vertical; background: rgba(13, 17, 23, 0.6); color: #e6edf3; border: 1px solid var(--border); border-radius: 8px; padding: 16px; white-space: pre; overflow-wrap: normal; overflow-x: auto;"></textarea>
+        <div id="featureSaveStatus" style="margin-top: 8px; font-size: 12px;"></div>
+      </div>
+
+      <div style="margin-bottom: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; flex-wrap: wrap; gap: 12px;">
+          <h3 style="font-size: 16px; margin: 0; color: var(--text-secondary); font-weight: 600;">🔧 Step Definitions</h3>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <button id="generateStepDefsBtn" style="display: none; padding: 8px 16px; font-size: 13px; background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3); white-space: nowrap;">
+              ✨ Generate Step Definitions
+            </button>
+            <button id="copyStepsBtn" style="padding: 6px 12px; font-size: 12px; background: rgba(90, 169, 255, 0.2); border: 1px solid rgba(90, 169, 255, 0.4); border-radius: 6px; color: #5aa9ff; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s; white-space: nowrap;">
+              <span id="copyStepsIcon">📋</span>
+              <span id="copyStepsText">Copy</span>
+            </button>
+            <button id="loadStepsBtn" style="display: none; padding: 6px 12px; font-size: 12px; background: rgba(90, 169, 255, 0.2); border: 1px solid rgba(90, 169, 255, 0.4); border-radius: 6px; color: #5aa9ff; cursor: pointer; white-space: nowrap;">📂 Load from File</button>
+            <button id="saveStepsBtn" style="display: none; padding: 6px 12px; font-size: 12px; background: linear-gradient(135deg, #10b981 0%, #34d399 100%); border: none; border-radius: 6px; color: white; cursor: pointer; white-space: nowrap;">💾 Save Changes</button>
+          </div>
+        </div>
+        <div id="stepDefsPrompt" style="display: none; padding: 24px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(167, 139, 250, 0.1) 100%); border: 2px solid rgba(139, 92, 246, 0.3); border-radius: 12px; margin-bottom: 16px; text-align: center;">
+          <div style="font-size: 48px; margin-bottom: 12px;">✨</div>
+          <h4 style="margin: 0 0 8px 0; color: var(--text); font-size: 18px; font-weight: 600;">Recording Complete!</h4>
+          <p style="margin: 0 0 16px 0; color: var(--muted); font-size: 14px; line-height: 1.6;">
+            You've recorded <strong id="recordedStepsCount" style="color: var(--accent);">0</strong> steps. 
+            <br/>Generate step definitions for your selected framework to use with Cucumber.
+          </p>
+          <div style="display: flex; gap: 12px; justify-content: center; align-items: center; flex-wrap: wrap;">
+            <label style="display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 14px;">
+              <span>Framework:</span>
+              <select id="stepDefsFramework" style="padding: 8px 12px; border-radius: 6px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 14px;">
+                <option value="playwright-java">Playwright + Java + Cucumber</option>
+                <option value="selenium-java">Selenium WebDriver + Java + Cucumber</option>
+              </select>
+            </label>
+            <button id="generateStepDefsPromptBtn" style="padding: 12px 24px; font-size: 15px; background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4); transition: transform 0.2s;">
+              ✨ Generate Step Definitions
+            </button>
+          </div>
+        </div>
+        <textarea id="code-steps" class="codeblock-editable" spellcheck="false" style="font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.5; tab-size: 2; width: 100%; min-height: 300px; resize: vertical; background: rgba(13, 17, 23, 0.6); color: #e6edf3; border: 1px solid var(--border); border-radius: 8px; padding: 16px; white-space: pre; overflow-wrap: normal; overflow-x: auto;"></textarea>
+        <div id="stepsSaveStatus" style="margin-top: 8px; font-size: 12px;"></div>
+      </div>
+
+      <div class="actions">
+        <button id="downloadZip" style="background: linear-gradient(135deg, #5aa9ff 0%, #8b5cf6 100%); padding: 14px 28px; font-size: 15px; box-shadow: var(--shadow-md), var(--shadow-glow);">🚀 Generate & Download Project</button>
+        <div style="margin-top: 12px; width: 100%;">
+        <span id="status"></span>
+        </div>
+      </div>
+
+      <!-- Maven Integration Panel -->
+      <div id="mavenPanel" style="display: none; margin-top: 32px; padding-top: 32px; border-top: 2px solid var(--border);">
+        <h2 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 24px;">☕</span>
+          <span>Maven Build & Test</span>
+        </h2>
+        <p style="font-size: 13px; color: var(--muted); margin: 0 0 20px 0; line-height: 1.6;">
+          Build and run your Maven projects directly from the IDE. No terminal needed!
+        </p>
+        
+        <!-- Maven Status -->
+        <div id="mavenStatus" style="margin-bottom: 20px; padding: 12px; background: rgba(13, 17, 23, 0.4); border-radius: 8px; border: 1px solid var(--border);">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span id="mavenStatusIcon">⏳</span>
+            <span id="mavenStatusText" style="font-weight: 600; color: var(--text);">Checking Maven installation...</span>
+          </div>
+          <div id="mavenStatusDetails" style="font-size: 12px; color: var(--muted);"></div>
+        </div>
+
+        <!-- Maven Quick Actions -->
+        <div style="margin-bottom: 20px;">
+          <h3 style="font-size: 14px; margin: 0 0 12px 0; color: var(--text-secondary); font-weight: 600;">Quick Actions</h3>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="mavenCleanInstall" style="padding: 10px 16px; font-size: 13px; background: linear-gradient(135deg, #10b981 0%, #34d399 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">🧹 Clean Install</button>
+            <button id="mavenTest" style="padding: 10px 16px; font-size: 13px; background: linear-gradient(135deg, #5aa9ff 0%, #7bb3ff 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">▶️ Run Tests</button>
+            <button id="mavenClean" style="padding: 10px 16px; font-size: 13px; background: linear-gradient(135deg, #6b7280 0%, #9ca3af 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">🗑️ Clean</button>
+            <button id="mavenCompile" style="padding: 10px 16px; font-size: 13px; background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">🔨 Compile</button>
+            <button id="mavenStop" style="display: none; padding: 10px 16px; font-size: 13px; background: linear-gradient(135deg, #ef4444 0%, #f87171 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">⏹️ Stop</button>
+          </div>
+        </div>
+
+        <!-- Maven Output -->
+        <div style="margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h3 style="font-size: 14px; margin: 0; color: var(--text-secondary); font-weight: 600;">Output</h3>
+            <button id="mavenClearOutput" style="padding: 4px 10px; font-size: 11px; background: rgba(107, 114, 128, 0.2); border: 1px solid rgba(107, 114, 128, 0.4); border-radius: 4px; color: var(--muted); cursor: pointer;">Clear</button>
+          </div>
+          <div id="mavenOutput" style="min-height: 200px; max-height: 400px; overflow-y: auto; padding: 12px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); border-radius: 8px; font-family: 'Courier New', monospace; font-size: 12px; color: var(--text); white-space: pre-wrap; word-wrap: break-word;">
+            <div style="color: var(--muted); font-style: italic;">No output yet. Run a Maven command to see results here.</div>
+          </div>
+        </div>
+
+        <!-- Maven Custom Command -->
+        <div>
+          <h3 style="font-size: 14px; margin: 0 0 12px 0; color: var(--text-secondary); font-weight: 600;">Custom Command</h3>
+          <div style="display: flex; gap: 8px;">
+            <input id="mavenCustomCommand" placeholder="e.g., test, clean install, verify" style="flex: 1; padding: 10px; border-radius: 6px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 13px; font-family: 'Courier New', monospace;"/>
+            <button id="mavenRunCustom" style="padding: 10px 20px; font-size: 13px; background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">Run</button>
+          </div>
+          <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 6px;">
+            💡 Enter Maven goals separated by spaces (e.g., "clean test" or "install -DskipTests")
+          </small>
+        </div>
+      </div>
+
+      <!-- NPM Integration Panel -->
+      <div id="npmPanel" style="display: none; margin-top: 32px; padding-top: 32px; border-top: 2px solid var(--border);">
+        <h2 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 24px;">📦</span>
+          <span>NPM Build & Test</span>
+        </h2>
+        <p style="font-size: 13px; color: var(--muted); margin: 0 0 20px 0; line-height: 1.6;">
+          Build and run your npm/Node.js projects directly from the IDE. No terminal needed!
+        </p>
+        
+        <!-- NPM Status -->
+        <div id="npmStatus" style="margin-bottom: 20px; padding: 12px; background: rgba(13, 17, 23, 0.4); border-radius: 8px; border: 1px solid var(--border);">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span id="npmStatusIcon">⏳</span>
+            <span id="npmStatusText" style="font-weight: 600; color: var(--text);">Checking npm installation...</span>
+          </div>
+          <div id="npmStatusDetails" style="font-size: 12px; color: var(--muted);"></div>
+        </div>
+
+        <!-- NPM Quick Actions -->
+        <div style="margin-bottom: 20px;">
+          <h3 style="font-size: 14px; margin: 0 0 12px 0; color: var(--text-secondary); font-weight: 600;">Quick Actions</h3>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="npmInstall" style="padding: 10px 16px; font-size: 13px; background: linear-gradient(135deg, #10b981 0%, #34d399 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">📥 Install</button>
+            <button id="npmTest" style="padding: 10px 16px; font-size: 13px; background: linear-gradient(135deg, #5aa9ff 0%, #7bb3ff 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">▶️ Run Tests</button>
+            <button id="npmRunBuild" style="padding: 10px 16px; font-size: 13px; background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">🔨 Build</button>
+            <button id="npmRunPlaywright" style="padding: 10px 16px; font-size: 13px; background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">🎭 Playwright Test</button>
+            <button id="npmStop" style="display: none; padding: 10px 16px; font-size: 13px; background: linear-gradient(135deg, #ef4444 0%, #f87171 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">⏹️ Stop</button>
+          </div>
+        </div>
+
+        <!-- NPM Output -->
+        <div style="margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h3 style="font-size: 14px; margin: 0; color: var(--text-secondary); font-weight: 600;">Output</h3>
+            <button id="npmClearOutput" style="padding: 4px 10px; font-size: 11px; background: rgba(107, 114, 128, 0.2); border: 1px solid rgba(107, 114, 128, 0.4); border-radius: 4px; color: var(--muted); cursor: pointer;">Clear</button>
+          </div>
+          <div id="npmOutput" style="min-height: 200px; max-height: 400px; overflow-y: auto; padding: 12px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); border-radius: 8px; font-family: 'Courier New', monospace; font-size: 12px; color: var(--text); white-space: pre-wrap; word-wrap: break-word;">
+            <div style="color: var(--muted); font-style: italic;">No output yet. Run an npm command to see results here.</div>
+          </div>
+        </div>
+
+        <!-- NPM Custom Command -->
+        <div>
+          <h3 style="font-size: 14px; margin: 0 0 12px 0; color: var(--text-secondary); font-weight: 600;">Custom Command</h3>
+          <div style="display: flex; gap: 8px;">
+            <input id="npmCustomCommand" placeholder="e.g., test, install, run build" style="flex: 1; padding: 10px; border-radius: 6px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 13px; font-family: 'Courier New', monospace;"/>
+            <button id="npmRunCustom" style="padding: 10px 20px; font-size: 13px; background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600;">Run</button>
+          </div>
+          <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 6px;">
+            💡 Enter npm command (e.g., "test", "install", "run build", "run test:headed")
+          </small>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>📄 Test Case Design from SRS/BRD</h2>
+      <p style="font-size: 13px; color: var(--muted); margin: 8px 0 16px 0;">
+        Upload your SRS (Software Requirements Specification) or BRD (Business Requirements Document) 
+        to automatically generate test cases. No scripting required - just upload and review!
+        <a href="/TEST_CASE_DESIGN_GUIDE.md" target="_blank" style="color: var(--accent); text-decoration: none; margin-left: 8px;">📖 Learn More</a>
+      </p>
+      
+      <div style="margin-bottom: 20px; padding: 16px; background: rgba(13, 17, 23, 0.4); border-radius: 8px; border: 1px solid var(--border);">
+        <label style="display: block; margin-bottom: 12px; font-weight: 600; color: var(--text);">
+          📎 Upload SRS/BRD Document
+        </label>
+        <input type="file" id="requirementDocument" accept=".txt,.md,.doc,.docx,.csv" style="width: 100%; padding: 10px; border-radius: 8px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 14px; margin-bottom: 12px;"/>
+        <small style="color: var(--muted); font-size: 11px; display: block; margin-bottom: 12px;">
+          Supported formats: .txt, .md, .doc, .docx, .csv
+          <a href="/sample-srs.txt" download style="color: var(--accent); text-decoration: none; margin-left: 8px;">📥 Download Sample SRS</a>
+        </small>
+        <button id="parseRequirements" style="background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%); padding: 12px 24px; font-size: 14px; box-shadow: var(--shadow-md);">
+          🔍 Parse Requirements & Generate Test Cases
+        </button>
+      </div>
+
+      <div id="requirementsResults" style="display: none; margin-top: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 12px; background: rgba(13, 17, 23, 0.4); border-radius: 8px; border: 1px solid var(--border); flex-wrap: wrap; gap: 12px;">
+          <div style="flex: 1; min-width: 200px;">
+            <strong style="color: var(--accent);">📊 Summary:</strong>
+            <span id="reqSummary" style="color: var(--text); margin-left: 8px;"></span>
+          </div>
+          <button id="generateFeatureFromRequirements" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%); padding: 8px 16px; font-size: 13px; white-space: nowrap; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 500; flex-shrink: 0;">
+            📝 Generate Feature File
+          </button>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <h3 style="font-size: 14px; margin: 0 0 12px 0; color: var(--accent); font-weight: 600;">📋 Extracted Requirements</h3>
+          <div id="requirementsList" style="max-height: 300px; overflow-y: auto; padding: 12px; background: rgba(13, 17, 23, 0.3); border-radius: 6px; border: 1px solid var(--border);"></div>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <h3 style="font-size: 14px; margin: 0 0 12px 0; color: var(--accent); font-weight: 600;">🧪 Generated Test Scenarios</h3>
+          <div id="testScenariosList" style="max-height: 300px; overflow-y: auto; padding: 12px; background: rgba(13, 17, 23, 0.3); border-radius: 6px; border: 1px solid var(--border);"></div>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <h3 style="font-size: 14px; margin: 0 0 12px 0; color: var(--accent); font-weight: 600;">🔗 Requirement Traceability</h3>
+          <div id="traceabilityMatrix" style="padding: 12px; background: rgba(13, 17, 23, 0.3); border-radius: 6px; border: 1px solid var(--border); font-size: 12px;">
+            <div id="traceabilityContent"></div>
+          </div>
+        </div>
+
+        <div id="generatedFeatureFromReq" style="display: none; margin-top: 20px;">
+          <h3 style="font-size: 14px; margin: 0 0 12px 0; color: var(--accent); font-weight: 600;">🥒 Generated Gherkin Feature</h3>
+          <pre id="requirementFeatureCode" class="codeblock" style="max-height: 400px; overflow-y: auto;"></pre>
+          <button id="copyRequirementFeature" style="margin-top: 8px; padding: 8px 16px; font-size: 13px; background: linear-gradient(135deg, #5aa9ff 0%, #8b5cf6 100%);">
+            📋 Copy Feature File
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <small>Playwright‑first. Extend for DB/MQ/API as needed.</small>
+    <div style="margin-top: 8px;">
+      <a href="/markdown-viewer.html?file=USER_MANUAL.md" target="_blank" style="color: var(--accent); text-decoration: none; margin-right: 16px;">📖 User Manual</a>
+      <a href="/markdown-viewer.html?file=QUICK_START_GUIDE.md" target="_blank" style="color: var(--accent); text-decoration: none; margin-right: 16px;">🚀 Quick Start</a>
+      <a href="/markdown-viewer.html?file=AUTOMATION_ENGINEER_GUIDE.md" target="_blank" style="color: var(--accent); text-decoration: none; margin-right: 16px;">🔧 Engineer's Guide</a>
+      <a href="/markdown-viewer.html?file=TEST_CASE_DESIGN_GUIDE.md" target="_blank" style="color: var(--accent); text-decoration: none;">📋 Test Design Guide</a>
+    </div>
+  </footer>
+
+  <script src="/stepHandlers.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

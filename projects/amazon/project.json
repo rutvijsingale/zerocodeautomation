@@ -1,0 +1,602 @@
+{
+  "id": "amazon",
+  "name": "AMAZON",
+  "baseUrl": "https://www.amazon.in/",
+  "framework": "selenium-java",
+  "browserType": "chromium",
+  "steps": [
+    {
+      "kind": "navigate",
+      "url": "https://www.amazon.in/",
+      "timestamp": 1764418484410,
+      "normalizedPageName": "Landing Page"
+    },
+    {
+      "kind": "click",
+      "selector": "#twotabsearchtextbox",
+      "locatorCandidates": [
+        {
+          "selector": "#twotabsearchtextbox",
+          "xpath": "//*[@id='twotabsearchtextbox']",
+          "type": "id",
+          "unique": true,
+          "matchCount": 1,
+          "stabilityScore": 100,
+          "description": "ID: #twotabsearchtextbox",
+          "seleniumExample": "By.id(\"twotabsearchtextbox\")",
+          "playwrightExample": "page.locator(\"#twotabsearchtextbox\")"
+        },
+        {
+          "selector": "[name=\"field-keywords\"]",
+          "xpath": "//*[@name='field-keywords']",
+          "type": "name",
+          "unique": true,
+          "matchCount": 1,
+          "stabilityScore": 75,
+          "description": "name: field-keywords",
+          "seleniumExample": "By.name(\"field-keywords\")",
+          "playwrightExample": "page.locator(\"[name=\"field-keywords\"]\")"
+        },
+        {
+          "selector": "[aria-label=\"Search Amazon.in\"]",
+          "xpath": "//*[@aria-label='Search Amazon.in']",
+          "type": "aria",
+          "unique": true,
+          "matchCount": 1,
+          "stabilityScore": 75,
+          "description": "aria-label: Search Amazon.in",
+          "seleniumExample": "By.cssSelector(\"[aria-label='Search Amazon.in']\")",
+          "playwrightExample": "page.getByRole(..., { name: \"Search Amazon.in\" })"
+        },
+        {
+          "selector": "input.nav-input.nav-progressive-attribute",
+          "type": "css",
+          "unique": false,
+          "matchCount": 2,
+          "stabilityScore": 60,
+          "description": "CSS: input.nav-input.nav-progressive-attribute",
+          "seleniumExample": "By.cssSelector(\"input.nav-input.nav-progressive-attribute\")",
+          "playwrightExample": "page.locator(\"input.nav-input.nav-progressive-attribute\")"
+        }
+      ],
+      "primaryLocatorIndex": 0,
+      "timestamp": 1764418498685,
+      "tagName": "INPUT",
+      "id": "twotabsearchtextbox",
+      "name": "field-keywords",
+      "placeholder": "Search Amazon.in",
+      "ariaLabel": "Search Amazon.in",
+      "title": "",
+      "textContent": "",
+      "value": "",
+      "type": "text",
+      "dataTestId": "",
+      "className": "nav-input nav-progressive-attribute",
+      "normalizedDescription": "Search Amazon.in Field",
+      "normalizedSelector": "#twotabsearchtextbox",
+      "normalizedStepText": "Click Search Amazon.in Field",
+      "liveFeatureStep": {
+        "keyword": "When",
+        "text": "When I Click \"Search Amazon.in Field\"",
+        "lineNumber": 2
+      }
+    },
+    {
+      "kind": "type",
+      "selector": "#twotabsearchtextbox",
+      "value": "Samsung ",
+      "locatorCandidates": [
+        {
+          "selector": "#twotabsearchtextbox",
+          "xpath": "//*[@id='twotabsearchtextbox']",
+          "type": "id",
+          "unique": true,
+          "matchCount": 1,
+          "stabilityScore": 100,
+          "description": "ID: #twotabsearchtextbox",
+          "seleniumExample": "By.id(\"twotabsearchtextbox\")",
+          "playwrightExample": "page.locator(\"#twotabsearchtextbox\")"
+        },
+        {
+          "selector": "[name=\"field-keywords\"]",
+          "xpath": "//*[@name='field-keywords']",
+          "type": "name",
+          "unique": true,
+          "matchCount": 1,
+          "stabilityScore": 75,
+          "description": "name: field-keywords",
+          "seleniumExample": "By.name(\"field-keywords\")",
+          "playwrightExample": "page.locator(\"[name=\"field-keywords\"]\")"
+        },
+        {
+          "selector": "[aria-label=\"Search Amazon.in\"]",
+          "xpath": "//*[@aria-label='Search Amazon.in']",
+          "type": "aria",
+          "unique": true,
+          "matchCount": 1,
+          "stabilityScore": 75,
+          "description": "aria-label: Search Amazon.in",
+          "seleniumExample": "By.cssSelector(\"[aria-label='Search Amazon.in']\")",
+          "playwrightExample": "page.getByRole(..., { name: \"Search Amazon.in\" })"
+        },
+        {
+          "selector": "input.nav-input.nav-progressive-attribute",
+          "type": "css",
+          "unique": false,
+          "matchCount": 2,
+          "stabilityScore": 60,
+          "description": "CSS: input.nav-input.nav-progressive-attribute",
+          "seleniumExample": "By.cssSelector(\"input.nav-input.nav-progressive-attribute\")",
+          "playwrightExample": "page.locator(\"input.nav-input.nav-progressive-attribute\")"
+        }
+      ],
+      "primaryLocatorIndex": 0,
+      "timestamp": 1764418508512,
+      "tagName": "INPUT",
+      "id": "twotabsearchtextbox",
+      "name": "field-keywords",
+      "placeholder": "Search Amazon.in",
+      "ariaLabel": "Search Amazon.in",
+      "title": "",
+      "textContent": "",
+      "type": "text",
+      "dataTestId": "",
+      "className": "nav-input nav-progressive-attribute",
+      "normalizedDescription": "Search Amazon.in Field",
+      "normalizedSelector": "#twotabsearchtextbox",
+      "normalizedStepText": "Enter \"Samsung \" In Search Amazon.in Field",
+      "liveFeatureStep": {
+        "keyword": "And",
+        "text": "And I Enter \"Samsung \" In \"Search Amazon.in Field\"",
+        "lineNumber": 3
+      }
+    },
+    {
+      "kind": "click",
+      "selector": "[aria-label=\"samsung s24 ultra 5g mobile\"]",
+      "locatorCandidates": [
+        {
+          "selector": "[aria-label=\"samsung s24 ultra 5g mobile\"]",
+          "xpath": "//*[@aria-label='samsung s24 ultra 5g mobile']",
+          "type": "aria",
+          "unique": true,
+          "matchCount": 1,
+          "stabilityScore": 75,
+          "description": "aria-label: samsung s24 ultra 5g mobile",
+          "seleniumExample": "By.cssSelector(\"[aria-label='samsung s24 ultra 5g mobile']\")",
+          "playwrightExample": "page.getByRole(..., { name: \"samsung s24 ultra 5g mobile\" })"
+        },
+        {
+          "selector": "text=\"samsung s24 ultra 5g mobile\"",
+          "xpath": "//div[normalize-space()='samsung s24 ultra 5g mobile']",
+          "type": "text",
+          "unique": false,
+          "matchCount": 0,
+          "stabilityScore": 80,
+          "description": "Text: \"samsung s24 ultra 5g mobile\"",
+          "seleniumExample": "By.xpath(\"//*[normalize-space()='samsung s24 ultra 5g mobile']\")",
+          "playwrightExample": "page.locator(\"text=\"samsung s24 ultra 5g mobile\"\")"
+        }
+      ],
+      "primaryLocatorIndex": 0,
+      "timestamp": 1764418510501,
+      "tagName": "DIV",
+      "id": "",
+      "name": "",
+      "placeholder": "",
+      "ariaLabel": "samsung s24 ultra 5g mobile",
+      "title": "",
+      "textContent": "samsung s24 ultra 5g mobile",
+      "value": "",
+      "type": "",
+      "dataTestId": "",
+      "className": "s-suggestion s-suggestion-ellipsis-direction",
+      "normalizedDescription": "Samsung s24 ultra 5g mobile",
+      "normalizedSelector": "[aria-label=\"samsung s24 ultra 5g mobile\"]",
+      "normalizedStepText": "Click Samsung s24 ultra 5g mobile",
+      "liveFeatureStep": {
+        "keyword": "And",
+        "text": "And I Click \"Samsung s24 ultra 5g mobile\"",
+        "lineNumber": 4
+      }
+    },
+    {
+      "kind": "navigate",
+      "url": "https://www.amazon.in/s?k=samsung%20s24%20ultra%205g%20mobile&i=aps&ref=nb_sb_ss_mvt-t11-ranker_1_8&crid=2LP3JDVEDSI99&sprefix=Samsung%20%2Caps%2C254",
+      "timestamp": 1764418511255,
+      "normalizedPageName": "S Page"
+    },
+    {
+      "kind": "navigate",
+      "url": "https://www.amazon.in/s?k=samsung+s24+ultra+5g+mobile&crid=2LP3JDVEDSI99&sprefix=Samsung+%2Caps%2C254&ref=nb_sb_ss_mvt-t11-ranker_1_8",
+      "timestamp": 1764418513031,
+      "normalizedPageName": "S Page"
+    },
+    {
+      "kind": "assertText",
+      "selector": "text=\"SponsoredSponsored You are seeing this ad based on\"",
+      "locatorCandidates": [
+        {
+          "selector": "text=\"SponsoredSponsored You are seeing this ad based on\"",
+          "xpath": "//div[contains(normalize-space(), 'SponsoredSponsored You are see')]",
+          "type": "text",
+          "unique": false,
+          "matchCount": 0,
+          "stabilityScore": 80,
+          "description": "Text: \"SponsoredSponsored You are seeing this a...\"",
+          "seleniumExample": "By.xpath(\"//*[normalize-space()='SponsoredSponsored You are see']\")",
+          "playwrightExample": "page.locator(\"text=\"SponsoredSponsored You are seeing this ad based on\"\")"
+        }
+      ],
+      "primaryLocatorIndex": 0,
+      "timestamp": 1764418533666,
+      "tagName": "DIV",
+      "id": "",
+      "name": "",
+      "placeholder": "",
+      "ariaLabel": "",
+      "title": "",
+      "textContent": "SponsoredSponsored You are seeing this ad based on the product’s relevance to your search query.Let us know  Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery Life 4.34.3 out of 5 stars (468)  Price, product page₹1,41,999₹1,41,999Flat INR 9000 Off on HDFC BankCardsFlat INR 9000 Off on HDFC BankCardsFREE delivery Mon, 1 DecOr fastest delivery Tomorrow, 30 NovAdd to cart+4 other colors/patterns",
+      "value": "",
+      "type": "",
+      "dataTestId": "",
+      "className": "puisg-col-inner",
+      "text": "SponsoredSponsored You are seeing this ad based on the product’s relevance to your search query.Let us know  Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery Life 4.34.3 out of 5 stars (468)  Price, product page₹1,41,999₹1,41,999Flat INR 9000 Off on HDFC BankCardsFlat INR 9000 Off on HDFC BankCardsFREE delivery Mon, 1 DecOr fastest delivery Tomorrow, 30 NovAdd to cart+4 other colors/patterns",
+      "expectedValue": "SponsoredSponsored You are seeing this ad based on the product’s relevance to your search query.Let us know  Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery Life 4.34.3 out of 5 stars (468)  Price, product page₹1,41,999₹1,41,999Flat INR 9000 Off on HDFC BankCardsFlat INR 9000 Off on HDFC BankCardsFREE delivery Mon, 1 DecOr fastest delivery Tomorrow, 30 NovAdd to cart+4 other colors/patterns",
+      "normalizedDescription": "Sponsored Sponsored You are seeing this ad...",
+      "normalizedSelector": "text=\"SponsoredSponsored You are seeing this ad based on\"",
+      "normalizedStepText": "Assert Text \"SponsoredSponsored Y...\" In Sponsored Sponsored You are seeing this ad...",
+      "liveFeatureStep": {
+        "keyword": "Then",
+        "text": "Then I should see \"SponsoredSponsored You are seeing this ad based on the product’s relevance to your search query.Let us know  Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery Life 4.34.3 out of 5 stars (468)  Price, product page₹1,41,999₹1,41,999Flat INR 9000 Off on HDFC BankCardsFlat INR 9000 Off on HDFC BankCardsFREE delivery Mon, 1 DecOr fastest delivery Tomorrow, 30 NovAdd to cart+4 other colors/patterns\" in \"text=\"SponsoredSponsored You are seeing this ad based on\"\"",
+        "lineNumber": 7
+      }
+    },
+    {
+      "kind": "assertText",
+      "selector": "text=\"Samsung Galaxy S25 Ultra 5G AI Smartphone (Titaniu\"",
+      "locatorCandidates": [
+        {
+          "selector": "text=\"Samsung Galaxy S25 Ultra 5G AI Smartphone (Titaniu\"",
+          "xpath": "//a[contains(normalize-space(), 'Samsung Galaxy S25 Ultra 5G AI')]",
+          "type": "text",
+          "unique": false,
+          "matchCount": 0,
+          "stabilityScore": 80,
+          "description": "Text: \"Samsung Galaxy S25 Ultra 5G AI Smartphon...\"",
+          "seleniumExample": "By.xpath(\"//*[normalize-space()='Samsung Galaxy S25 Ultra 5G AI']\")",
+          "playwrightExample": "page.locator(\"text=\"Samsung Galaxy S25 Ultra 5G AI Smartphone (Titaniu\"\")"
+        }
+      ],
+      "primaryLocatorIndex": 0,
+      "timestamp": 1764418555170,
+      "tagName": "A",
+      "id": "",
+      "name": "",
+      "placeholder": "",
+      "ariaLabel": "",
+      "title": "",
+      "textContent": "Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery Life",
+      "value": "",
+      "type": "",
+      "dataTestId": "",
+      "className": "a-link-normal s-line-clamp-2 s-line-clamp-3-for-col-12 s-link-style a-text-normal",
+      "text": "Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery Life",
+      "expectedValue": "Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery Life",
+      "normalizedDescription": "Samsung Galaxy S25 Ultra 5G AI Smartphone Titanium Gray, 12GB RAM, 512GB Storage , 200MP Camera, S Pen Included, Long Battery Life",
+      "normalizedSelector": "text=\"Samsung Galaxy S25 Ultra 5G AI Smartphone (Titaniu\"",
+      "normalizedStepText": "Assert Text \"Samsung Galaxy S25 U...\" In Samsung Galaxy S25 Ultra 5G AI Smartphone Titanium Gray, 12GB RAM, 512GB Storage , 200MP Camera, S Pen Included, Long Battery Life",
+      "liveFeatureStep": {
+        "keyword": "Then",
+        "text": "Then I should see \"Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery Life\" in \"text=\"Samsung Galaxy S25 Ultra 5G AI Smartphone (Titaniu\"\"",
+        "lineNumber": 8
+      }
+    },
+    {
+      "kind": "scroll",
+      "scrollX": 0,
+      "scrollY": 200,
+      "viewportHeight": 600,
+      "viewportWidth": 1280,
+      "scroll": {
+        "mode": "y",
+        "y": 200,
+        "locatorCandidates": [
+          {
+            "selector": "text=\"Price, product page₹25,998₹25,998 M.R.P: ₹45,999M.R.P: ₹45,999₹45,999 (43% off)\"",
+            "xpath": "//div[contains(normalize-space(), 'Price, product page₹25,998₹25,')]",
+            "type": "text",
+            "unique": false,
+            "matchCount": 0,
+            "stabilityScore": 80,
+            "description": "Text: \"Price, product page₹25,998₹25,998 M.R.P:...\"",
+            "seleniumExample": "By.xpath(\"//*[normalize-space()='Price, product page₹25,998₹25,']\")",
+            "playwrightExample": "page.locator(\"text=\"Price, product page₹25,998₹25,998 M.R.P: ₹45,999M.R.P: ₹45,999₹45,999 (43% off)\"\")"
+          }
+        ],
+        "primaryLocatorIndex": 0
+      },
+      "targetElementMetadata": {
+        "tagName": "DIV",
+        "id": "",
+        "name": "",
+        "placeholder": "",
+        "ariaLabel": "",
+        "title": "",
+        "textContent": "Price, product page₹25,998₹25,998 M.R.P: ₹45,999M.R.P: ₹45,999₹45,999 (43% off)",
+        "value": "",
+        "type": "",
+        "dataTestId": "",
+        "className": "a-row"
+      },
+      "timestamp": 1764418569780,
+      "normalizedStepText": "Scroll To Y Position 200",
+      "liveFeatureStep": {
+        "keyword": "And",
+        "text": "And I scroll to position Y 200",
+        "lineNumber": 9
+      }
+    },
+    {
+      "kind": "click",
+      "selector": "#a-autoid-1-announce",
+      "locatorCandidates": [
+        {
+          "selector": "#a-autoid-1-announce",
+          "xpath": "//*[@id='a-autoid-1-announce']",
+          "type": "id",
+          "unique": true,
+          "matchCount": 1,
+          "stabilityScore": 100,
+          "description": "ID: #a-autoid-1-announce",
+          "seleniumExample": "By.id(\"a-autoid-1-announce\")",
+          "playwrightExample": "page.locator(\"#a-autoid-1-announce\")"
+        },
+        {
+          "selector": "text=\"Add to cart\"",
+          "xpath": "//button[normalize-space()='Add to cart']",
+          "type": "text",
+          "unique": false,
+          "matchCount": 0,
+          "stabilityScore": 80,
+          "description": "Text: \"Add to cart\"",
+          "seleniumExample": "By.xpath(\"//*[normalize-space()='Add to cart']\")",
+          "playwrightExample": "page.locator(\"text=\"Add to cart\"\")"
+        }
+      ],
+      "primaryLocatorIndex": 0,
+      "timestamp": 1764418570754,
+      "tagName": "BUTTON",
+      "id": "a-autoid-1-announce",
+      "name": "submit.addToCart",
+      "placeholder": "",
+      "ariaLabel": "Add to cart",
+      "title": "",
+      "textContent": "Add to cart",
+      "value": "",
+      "type": "button",
+      "dataTestId": "",
+      "className": "a-button-text",
+      "normalizedDescription": "Add To Cart Button",
+      "normalizedSelector": "#a-autoid-1-announce",
+      "normalizedStepText": "Click Add To Cart Button",
+      "liveFeatureStep": {
+        "keyword": "And",
+        "text": "And I Click \"Add To Cart Button\"",
+        "lineNumber": 10
+      }
+    },
+    {
+      "kind": "scroll",
+      "scrollX": 0,
+      "scrollY": 0,
+      "viewportHeight": 600,
+      "viewportWidth": 1280,
+      "scroll": {
+        "mode": "y",
+        "y": 0,
+        "locatorCandidates": [
+          {
+            "selector": "text=\"4.3 out of 5 stars\"",
+            "xpath": "//a[normalize-space()='4.3 out of 5 stars']",
+            "type": "text",
+            "unique": false,
+            "matchCount": 0,
+            "stabilityScore": 80,
+            "description": "Text: \"4.3 out of 5 stars\"",
+            "seleniumExample": "By.xpath(\"//*[normalize-space()='4.3 out of 5 stars']\")",
+            "playwrightExample": "page.locator(\"text=\"4.3 out of 5 stars\"\")"
+          }
+        ],
+        "primaryLocatorIndex": 0
+      },
+      "targetElementMetadata": {
+        "tagName": "A",
+        "id": "",
+        "name": "",
+        "placeholder": "",
+        "ariaLabel": "4.3 out of 5 stars, rating details",
+        "title": "",
+        "textContent": "4.3 out of 5 stars",
+        "value": "",
+        "type": "",
+        "dataTestId": "",
+        "className": "a-popover-trigger a-declarative mvt-review-star-mini-popover"
+      },
+      "timestamp": 1764418573513,
+      "normalizedStepText": "Scroll To Y Position 0",
+      "liveFeatureStep": {
+        "keyword": "And",
+        "text": "And I scroll to position Y 0",
+        "lineNumber": 11
+      }
+    },
+    {
+      "kind": "click",
+      "selector": "text=\"Go to Cart\"",
+      "locatorCandidates": [
+        {
+          "selector": "text=\"Go to Cart\"",
+          "xpath": "//a[normalize-space()='Go to Cart']",
+          "type": "text",
+          "unique": false,
+          "matchCount": 0,
+          "stabilityScore": 80,
+          "description": "Text: \"Go to Cart\"",
+          "seleniumExample": "By.xpath(\"//*[normalize-space()='Go to Cart']\")",
+          "playwrightExample": "page.locator(\"text=\"Go to Cart\"\")"
+        },
+        {
+          "selector": "a.a-button-text",
+          "type": "css",
+          "unique": false,
+          "matchCount": 2,
+          "stabilityScore": 60,
+          "description": "CSS: a.a-button-text",
+          "seleniumExample": "By.cssSelector(\"a.a-button-text\")",
+          "playwrightExample": "page.locator(\"a.a-button-text\")"
+        }
+      ],
+      "primaryLocatorIndex": 0,
+      "timestamp": 1764418575232,
+      "tagName": "A",
+      "id": "",
+      "name": "",
+      "placeholder": "",
+      "ariaLabel": "",
+      "title": "",
+      "textContent": "Go to Cart",
+      "value": "",
+      "type": "",
+      "dataTestId": "",
+      "className": "a-button-text",
+      "normalizedDescription": "Go To Cart Button",
+      "normalizedSelector": "text=\"Go to Cart\"",
+      "normalizedStepText": "Click Go To Cart Button",
+      "liveFeatureStep": {
+        "keyword": "And",
+        "text": "And I Click \"Go To Cart Button\"",
+        "lineNumber": 12
+      }
+    },
+    {
+      "kind": "navigate",
+      "url": "https://www.amazon.in/cart?ref_=ox_ewc_ret_gtc_dsk_in",
+      "timestamp": 1764418575471,
+      "normalizedPageName": "Shopping Cart Page"
+    },
+    {
+      "kind": "assertText",
+      "selector": "a.a-link-normal.sc-product-link.sc-product-title.aok-block",
+      "locatorCandidates": [
+        {
+          "selector": "a.a-link-normal.sc-product-link.sc-product-title.aok-block",
+          "type": "css",
+          "unique": true,
+          "matchCount": 1,
+          "stabilityScore": 60,
+          "description": "CSS: a.a-link-normal.sc-product-link.sc-product-title.aok-block",
+          "seleniumExample": "By.cssSelector(\"a.a-link-normal.sc-product-link.sc-product-title.aok-block\")",
+          "playwrightExample": "page.locator(\"a.a-link-normal.sc-product-link.sc-product-title.aok-block\")"
+        },
+        {
+          "selector": "text=\"Samsung Galaxy S25 Ultra 5G AI Smartphone (Titaniu\"",
+          "xpath": "//a[contains(normalize-space(), 'Samsung Galaxy S25 Ultra 5G AI')]",
+          "type": "text",
+          "unique": false,
+          "matchCount": 0,
+          "stabilityScore": 80,
+          "description": "Text: \"Samsung Galaxy S25 Ultra 5G AI Smartphon...\"",
+          "seleniumExample": "By.xpath(\"//*[normalize-space()='Samsung Galaxy S25 Ultra 5G AI']\")",
+          "playwrightExample": "page.locator(\"text=\"Samsung Galaxy S25 Ultra 5G AI Smartphone (Titaniu\"\")"
+        }
+      ],
+      "primaryLocatorIndex": 0,
+      "timestamp": 1764418584169,
+      "tagName": "A",
+      "id": "",
+      "name": "",
+      "placeholder": "",
+      "ariaLabel": "",
+      "title": "",
+      "textContent": "Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery LifeSamsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included,…\n                \n            \n            \n        \n    \n\n\n    \n    \n        \n            \n            Opens in a new tab",
+      "value": "",
+      "type": "",
+      "dataTestId": "",
+      "className": "a-link-normal sc-product-link sc-product-title aok-block",
+      "text": "Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery LifeSamsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included,…\n                \n            \n            \n        \n    \n\n\n    \n    \n        \n            \n            Opens in a new tab",
+      "expectedValue": "Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery LifeSamsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included,…\n                \n            \n            \n        \n    \n\n\n    \n    \n        \n            \n            Opens in a new tab",
+      "normalizedDescription": "Samsung Galaxy S25 Ultra 5G AI Smartphone Titanium Gray, 12GB RAM, 512GB Storage , 200MP Camera, S Pen Included, Long Battery Life Samsung Galaxy S25 Ultra 5G AI Smartphone Titanium Gray, 12GB RAM, 512GB Storage , 200MP Camera, S Pen Included, Opens in a new tab",
+      "normalizedSelector": "a.a-link-normal.sc-product-link.sc-product-title.aok-block",
+      "normalizedStepText": "Assert Text \"Samsung Galaxy S25 U...\" In Samsung Galaxy S25 Ultra 5G AI Smartphone Titanium Gray, 12GB RAM, 512GB Storage , 200MP Camera, S Pen Included, Long Battery Life Samsung Galaxy S25 Ultra 5G AI Smartphone Titanium Gray, 12GB RAM, 512GB Storage , 200MP Camera, S Pen Included, Opens in a new tab",
+      "liveFeatureStep": {
+        "keyword": "Then",
+        "text": "Then I should see \"Samsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included, Long Battery LifeSamsung Galaxy S25 Ultra 5G AI Smartphone (Titanium Gray, 12GB RAM, 512GB Storage), 200MP Camera, S Pen Included,…\n                \n            \n            \n        \n    \n\n\n    \n    \n        \n            \n            Opens in a new tab\" in \"a.a-link-normal.sc-product-link.sc-product-title.aok-block\"",
+        "lineNumber": 14
+      }
+    },
+    {
+      "kind": "click",
+      "selector": "[name=\"proceedToRetailCheckout\"]",
+      "locatorCandidates": [
+        {
+          "selector": "[name=\"proceedToRetailCheckout\"]",
+          "xpath": "//*[@name='proceedToRetailCheckout']",
+          "type": "name",
+          "unique": true,
+          "matchCount": 1,
+          "stabilityScore": 75,
+          "description": "name: proceedToRetailCheckout",
+          "seleniumExample": "By.name(\"proceedToRetailCheckout\")",
+          "playwrightExample": "page.locator(\"[name=\"proceedToRetailCheckout\"]\")"
+        }
+      ],
+      "primaryLocatorIndex": 0,
+      "timestamp": 1764418616117,
+      "tagName": "INPUT",
+      "id": "",
+      "name": "proceedToRetailCheckout",
+      "placeholder": "",
+      "ariaLabel": "",
+      "title": "",
+      "textContent": "",
+      "value": "Proceed to checkout",
+      "type": "submit",
+      "dataTestId": "",
+      "className": "a-button-input",
+      "normalizedDescription": "Proceed To Retail Checkout Field",
+      "normalizedSelector": "[name=\"proceedToRetailCheckout\"]",
+      "normalizedStepText": "Click Proceed To Retail Checkout Field",
+      "liveFeatureStep": {
+        "keyword": "And",
+        "text": "And I Click \"Proceed To Retail Checkout Field\"",
+        "lineNumber": 15
+      }
+    },
+    {
+      "kind": "navigate",
+      "url": "https://www.amazon.in/ap/signin?openid.pape.max_auth_age=900&openid.return_to=https%3A%2F%2Fwww.amazon.in%2Fcheckout%2Fentry%2Fcart%3FisEligibilityLogicDisabled%3D1%26referrer%3Dcart%26proceedToCheckout%3D1%26proceedToCheckout%3D1%26ref_%3Dox_sc_proceed%26oldCustomerId%3D0%26tangoWeblabStatus%3Dtango_enable_unrec_customer%26sessionID%3D523-3934417-3163567%26pipelineType%3DChewbacca%26isToBeGiftWrappedBefore%3D0%26useDefaultCart%3D1%26isUnrec%3D1&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=amazon_checkout_in&openid.mode=checkid_setup&language=en_IN&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0",
+      "timestamp": 1764418616821,
+      "normalizedPageName": "Signin Page"
+    },
+    {
+      "kind": "close",
+      "timestamp": 1764418620574
+    }
+  ],
+  "backgroundSteps": [],
+  "scenarios": [],
+  "bddOptions": {
+    "useScenarioOutline": false,
+    "examples": [],
+    "markAsBackground": false,
+    "createNewScenario": false
+  },
+  "pages": [],
+  "locators": [],
+  "testData": [],
+  "reusableFlows": [],
+  "metadata": {
+    "updated": "2025-11-29T12:17:06.995Z"
+  }
+}

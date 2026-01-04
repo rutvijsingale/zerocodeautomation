@@ -1,0 +1,156 @@
+SOFTWARE REQUIREMENTS SPECIFICATION (SRS)
+Sample E-Commerce Application
+
+==========================================
+1. USER AUTHENTICATION
+==========================================
+
+REQ-001: User Login
+Users must be able to log in to the system using their registered email and password.
+Acceptance Criteria:
+Given I am on the login page
+When I enter valid email and password
+Then I should be logged in successfully
+And I should be redirected to the dashboard
+And I should see my user profile information
+
+REQ-002: User Registration
+New users must be able to create an account.
+Acceptance Criteria:
+Given I am on the registration page
+When I enter valid registration details
+And I click the register button
+Then my account should be created
+And I should receive a confirmation email
+
+REQ-003: Password Reset
+Users must be able to reset their password if forgotten.
+When I click "Forgot Password"
+And I enter my email address
+Then I should receive a password reset link
+When I click the reset link
+And I enter a new password
+Then my password should be updated
+
+==========================================
+2. PRODUCT SEARCH AND BROWSING
+==========================================
+
+REQ-004: Product Search
+The system shall provide a search functionality that allows users to find products.
+When I enter a search term in the search box
+And I click the search button
+Then I should see relevant products
+And search results should load within 2 seconds
+
+REQ-005: Product Filtering
+Users must be able to filter search results by category, price range, and rating.
+Given I am viewing search results
+When I select a category filter
+And I set a price range
+Then only products matching the filters should be displayed
+
+REQ-006: Product Details
+Users must be able to view detailed information about products.
+When I click on a product
+Then I should see product details including:
+- Product name and description
+- Price and availability
+- Product images
+- Customer reviews and ratings
+
+==========================================
+3. SHOPPING CART
+==========================================
+
+REQ-007: Add to Cart
+Users must be able to add products to their shopping cart.
+Given I am viewing a product
+When I click "Add to Cart"
+Then the product should be added to my cart
+And I should see a confirmation message
+And the cart icon should show the updated item count
+
+REQ-008: View Cart
+Users must be able to view items in their shopping cart.
+When I click on the cart icon
+Then I should see all items in my cart
+And I should see the total price
+And I should be able to update quantities or remove items
+
+REQ-009: Update Cart
+Users must be able to modify items in their cart.
+Given I am viewing my cart
+When I change the quantity of an item
+Then the cart total should update automatically
+When I remove an item
+Then it should be removed from the cart
+
+==========================================
+4. CHECKOUT PROCESS
+==========================================
+
+REQ-010: Checkout
+Users must be able to complete a purchase.
+Given I have items in my cart
+When I proceed to checkout
+Then I should be able to enter shipping information
+And I should be able to select a payment method
+And I should see the order summary
+When I confirm the order
+Then the order should be placed successfully
+And I should receive an order confirmation
+
+REQ-011: Payment Processing
+The system must securely process payments.
+Given I am on the payment page
+When I enter valid payment details
+And I submit the payment
+Then the payment should be processed securely
+And I should see a payment confirmation
+
+==========================================
+5. USER PROFILE
+==========================================
+
+REQ-012: View Profile
+Users must be able to view their profile information.
+When I navigate to my profile
+Then I should see my account information
+And I should see my order history
+And I should see my saved addresses
+
+REQ-013: Update Profile
+Users must be able to update their profile information.
+Given I am on my profile page
+When I update my information
+And I click save
+Then my profile should be updated
+And I should see a confirmation message
+
+==========================================
+6. PERFORMANCE REQUIREMENTS
+==========================================
+
+NFR-001: Page Load Performance
+All pages must load within 3 seconds under normal load conditions.
+
+NFR-002: Search Response Time
+Search results must be returned within 2 seconds for queries up to 1000 results.
+
+NFR-003: System Availability
+The system must be available 99.9% of the time.
+
+==========================================
+7. SECURITY REQUIREMENTS
+==========================================
+
+SEC-001: Data Encryption
+All sensitive user data must be encrypted in transit and at rest.
+
+SEC-002: Authentication Security
+The system must implement secure authentication with password hashing and session management.
+
+SEC-003: Payment Security
+Payment information must be processed using PCI-DSS compliant methods.
+
