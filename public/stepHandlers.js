@@ -113,10 +113,26 @@ function generatePlaywrightStepCode(step) {
         lines.push(`  await page.evaluate(({x, y}) => window.scrollTo(x, y), { x: ${x}, y: ${y} });`);
       }
       break;
-    case 'dragDrop':
+    case 'dragDrop': {
       // T1.2 — Playwright has dragTo for the common case.
-      lines.push(`  await page.locator(${JSON.stringify(step.sourceSelector || step.selector)}).dragTo(page.locator(${JSON.stringify(step.targetSelector || '')}));`);
+      // [ZAC-FIX] Bug 2 — validate both selectors before generating; an
+      // empty selector compiles to `page.locator("")` which throws at
+      // runtime ("locator(): expected non-empty selector"). When either
+      // side is missing we emit a TODO so the QA can spot it instead of
+      // silently producing a flaky test.
+      const dragSrc = step.sourceSelector || step.selector;
+      const dragTgt = step.targetSelector;
+      if (!dragSrc || !dragTgt) {
+        const reason = !dragSrc && !dragTgt
+          ? 'source AND target missing'
+          : (!dragSrc ? 'source missing' : 'target missing');
+        console.warn('[stepHandlers] dragDrop step skipped (Playwright):', reason, step);
+        lines.push(`  // TODO dragDrop skipped — ${reason}. Recorded payload: ${JSON.stringify(step).replace(/\*\//g, '*\\/').slice(0, 200)}`);
+      } else {
+        lines.push(`  await page.locator(${JSON.stringify(dragSrc)}).dragTo(page.locator(${JSON.stringify(dragTgt)}));`);
+      }
       break;
+    }
     case 'fileUpload':
       // T1.3 — accept either a single filename or an array of names. We
       // pass the recorded value through; the test runner is responsible
@@ -229,12 +245,26 @@ function generateSeleniumStepCode(step) {
         lines.push(`    ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("window.scrollTo(${x}, ${y})");`);
       }
       break;
-    case 'dragDrop':
+    case 'dragDrop': {
       // T1.2 — Actions API drag-and-drop.
-      lines.push(`    WebElement dragSource = driver.findElement(By.cssSelector(${JSON.stringify(step.sourceSelector || step.selector)}));`);
-      lines.push(`    WebElement dragTarget = driver.findElement(By.cssSelector(${JSON.stringify(step.targetSelector || '')}));`);
-      lines.push(`    new org.openqa.selenium.interactions.Actions(driver).dragAndDrop(dragSource, dragTarget).perform();`);
+      // [ZAC-FIX] Bug 2 — validate both selectors before generating;
+      // `By.cssSelector("")` throws InvalidSelectorException at runtime.
+      // Emit a TODO comment + console.warn instead of producing broken code.
+      const dragSrc = step.sourceSelector || step.selector;
+      const dragTgt = step.targetSelector;
+      if (!dragSrc || !dragTgt) {
+        const reason = !dragSrc && !dragTgt
+          ? 'source AND target missing'
+          : (!dragSrc ? 'source missing' : 'target missing');
+        console.warn('[stepHandlers] dragDrop step skipped (Selenium):', reason, step);
+        lines.push(`    // TODO dragDrop skipped — ${reason}. Recorded payload: ${JSON.stringify(step).replace(/\*\//g, '*\\/').slice(0, 200)}`);
+      } else {
+        lines.push(`    WebElement dragSource = driver.findElement(By.cssSelector(${JSON.stringify(dragSrc)}));`);
+        lines.push(`    WebElement dragTarget = driver.findElement(By.cssSelector(${JSON.stringify(dragTgt)}));`);
+        lines.push(`    new org.openqa.selenium.interactions.Actions(driver).dragAndDrop(dragSource, dragTarget).perform();`);
+      }
       break;
+    }
     case 'fileUpload':
       // T1.3 — sendKeys on the file input is the standard Selenium upload.
       const uploadFile = Array.isArray(step.files) && step.files[0]

@@ -212,6 +212,47 @@ function getFindByAnnotation(locator) {
   };
   const escape = (v) => String(v).replace(/"/g, '\\"');
 
+  // [ZAC-FIX] Bug 1 — `text` case produced invalid XPath when the text
+  // contained an apostrophe (e.g. "don't") because XPath 1.0 has NO
+  // escape syntax for quote characters inside its string literals. The
+  // *only* correct strategies are:
+  //   • Wrap in '...' when the text has no '         (preferred)
+  //   • Wrap in "..."  when it has no "
+  //   • Use concat('a', "'", 'b') when both are present
+  // After picking the XPath wrapping, every literal " (whether from the
+  // outer wrap or from the value) must still be escaped for the
+  // surrounding Java double-quoted string literal — JavaScript template
+  // produces "\\\"" → JS string "\\"" → output `\"` → Java sees `"`.
+  function xpathTextLiteralForJava(text) {
+    const hasSingle = text.includes("'");
+    const hasDouble = text.includes('"');
+    // Java-escape any literal " inside `s` so it survives the surrounding
+    // Java "..." string. Bare " would otherwise terminate the literal.
+    const j = (s) => String(s).replace(/"/g, '\\"');
+
+    if (!hasSingle && !hasDouble) {
+      // Plain text — XPath 'text' wrapped in Java "..." needs no escapes.
+      return `'${text}'`;
+    }
+    if (!hasSingle) {
+      // Value contains ", but no '. XPath wraps in '...'; the inner "
+      // chars are literal in XPath but still need Java-escaping.
+      return `'${j(text)}'`;
+    }
+    if (!hasDouble) {
+      // Value contains ', but no ". XPath wraps in "..."; both the
+      // wrapping quotes and any value " (none here) are Java-escaped.
+      return `${j('"')}${text}${j('"')}`;
+    }
+    // Both ' and " present in the value. XPath has no native escape so
+    // we splice via concat(). Split on ' to get chunks (none of which
+    // contain '), wrap each in '...', join with the literal "'" string
+    // — which itself needs Java-escaping.
+    const chunks = text.split("'").map((piece) => `'${j(piece)}'`);
+    const apostropheLiteral = `${j('"')}'${j('"')}`; // → \"'\"
+    return `concat(${chunks.join(`, ${apostropheLiteral}, `)})`;
+  }
+
   switch (locator.locatorType) {
     case 'css':
       return `css = "${escape(raw)}"`;
@@ -227,9 +268,13 @@ function getFindByAnnotation(locator) {
       return `css = "${escape(raw)}"`;
     case 'role':
       return `css = "${escape(raw)}"`;
-    case 'text':
-      // text= is Playwright; for Selenium, fall back to xpath that filters by text
-      return `xpath = "//*[normalize-space(text())='${escape(raw.replace(/^text=/, ''))}']"`;
+    case 'text': {
+      // text= is Playwright; for Selenium, fall back to xpath that filters
+      // by text. xpathTextLiteralForJava() handles every combination of
+      // ' and " in the value (Bug 1 fix).
+      const text = raw.replace(/^text=/, '');
+      return `xpath = "//*[normalize-space(text())=${xpathTextLiteralForJava(text)}]"`;
+    }
     default:
       return `css = "${escape(raw)}"`;
   }
