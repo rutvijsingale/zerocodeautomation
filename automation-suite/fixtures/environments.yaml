@@ -1,0 +1,25 @@
+# Fixtures - environments
+
+valid_envs:
+  - name: "DEV"
+    baseUrl: "http://localhost:3000"
+    browserType: "chromium"
+    headless: true
+    timeouts: { default: 5000, navigation: 10000, element: 5000, pageLoad: 10000, script: 10000 }
+    description: "developer machine"
+  - name: "QA"
+    baseUrl: "https://qa.example.com"
+    browserType: "firefox"
+    headless: true
+  - name: "PROD-LIKE"
+    baseUrl: "https://staging.example.com"
+    browserType: "webkit"
+    headless: true
+
+invalid_envs:
+  - id: missing_name
+    payload: { baseUrl: "http://x" }
+    expected_status_set: [400]
+  - id: missing_baseUrl
+    payload: { name: "X" }
+    expected_status_set: [400]

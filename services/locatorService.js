@@ -23,6 +23,21 @@ export class LocatorService {
   }
 
   /**
+   * Drop the in-memory cache for a project. Call this whenever a project
+   * is deleted or its locators.json is removed from disk; otherwise the
+   * next loadLocators() call returns stale data and auto-promotion on a
+   * fresh recording silently treats every locator as a duplicate.
+   * @param {string} [projectName] - When omitted, clears the entire cache.
+   */
+  invalidateCache(projectName) {
+    if (!projectName) {
+      this.locatorCache.clear();
+      return;
+    }
+    this.locatorCache.delete(projectName);
+  }
+
+  /**
    * Get locator repository file path for a project
    * @param {string} projectName - Project name (or project ID)
    * @returns {string} File path

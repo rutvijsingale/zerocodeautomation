@@ -1,0 +1,18 @@
+# Fixtures - test_runner / rerun
+
+simple_steps:
+  - { kind: navigate, url: "https://example.com" }
+  - { kind: assertVisible, selector: "h1" }
+
+invalid_rerun:
+  - id: empty_steps
+    payload: { steps: [], browserType: "chromium", baseUrl: "about:blank", headless: true }
+    expected_status_set: [400, 500]
+  - id: missing_steps
+    payload: { browserType: "chromium" }
+    expected_status_set: [400, 500]
+
+cancel_cases:
+  - id: missing_execution_id
+    payload: {}
+    expected_status_set: [200, 400]   # server tolerates and uses most-recent

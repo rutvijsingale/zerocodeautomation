@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>ZAC Settings</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!--
+  Settings page mounted in an iframe inside index.html's Settings tab.
+  Stand-alone — also reachable directly at /settings.html for power users.
+  Pure HTML/CSS/JS, no CDN, works fully offline.
+-->
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1f242f;
+    --border: #2a313d;
+    --text: #e8ecf2;
+    --text-dim: #9aa4b2;
+    --accent: #a78bfa;
+    --green: #4ade80;
+    --red: #f87171;
+    --amber: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 24px;
+  }
+  h1 { margin: 0 0 4px 0; font-size: 18px; }
+  h1 .badge {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 3px 10px;
+    background: rgba(167, 139, 250, 0.15);
+    color: var(--accent);
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  p.lede { color: var(--text-dim); font-size: 13px; margin: 4px 0 24px 0; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+    max-width: 900px;
+  }
+  .panel h2 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .panel .desc { color: var(--text-dim); font-size: 12px; margin: 0 0 16px 0; }
+
+  /* Toggle switch */
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+  }
+  .row:first-of-type { border-top: none; }
+  .row .info { flex: 1; }
+  .row .info .label { font-size: 13px; font-weight: 600; color: var(--text); }
+  .row .info .hint  { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .row .control { margin-left: 18px; }
+
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 56px; height: 30px;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .slider:before {
+    content: "";
+    position: absolute;
+    height: 22px; width: 22px;
+    left: 3px; top: 3px;
+    background: #6b7280;
+    border-radius: 50%;
+    transition: transform 0.18s, background 0.15s;
+  }
+  .switch input:checked + .slider {
+    background: rgba(74, 222, 128, 0.2);
+    border-color: rgba(74, 222, 128, 0.5);
+  }
+  .switch input:checked + .slider:before {
+    background: var(--green);
+    transform: translateX(26px);
+  }
+  .switch input:disabled + .slider { opacity: 0.5; cursor: not-allowed; }
+
+  .status {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  .status.ok    { color: var(--green); }
+  .status.warn  { color: var(--amber); }
+  .status.error { color: var(--red); }
+
+  select {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    min-width: 280px;
+  }
+
+  .install-block {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(167, 139, 250, 0.05);
+    border: 1px solid rgba(167, 139, 250, 0.2);
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  .install-block code {
+    display: block;
+    background: #0c0f15;
+    padding: 8px 10px;
+    border-radius: 4px;
+    margin-top: 6px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    color: #d4d4d4;
+    user-select: all;
+  }
+
+  .footer-note {
+    color: var(--text-dim);
+    font-size: 11px;
+    margin-top: 24px;
+    max-width: 900px;
+    line-height: 1.6;
+  }
+  .footer-note a { color: var(--accent); }
+
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    padding: 12px 18px;
+    background: var(--panel);
+    border-radius: 8px; font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 9999;
+    max-width: 420px;
+  }
+  .toast.ok    { border: 1px solid var(--green); color: var(--green); }
+  .toast.error { border: 1px solid var(--red); color: var(--red); }
+  .toast.info  { border: 1px solid #5aa9ff; color: #5aa9ff; }
+
+  /* Email config form */
+  .email-form { display: grid; grid-template-columns: 180px 1fr; gap: 10px 14px; margin-top: 4px; }
+  .email-form label { font-size: 12px; color: var(--text-dim); align-self: center; font-weight: 600; }
+  .email-form input[type="text"], .email-form input[type="number"], .email-form input[type="password"], .email-form input[type="email"] {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px 10px; font-size: 13px; font-family: inherit;
+    width: 100%;
+  }
+  .email-form input:focus { outline: none; border-color: rgba(167,139,250,0.6); }
+  .email-form .row-inline { display: flex; gap: 8px; align-items: center; }
+  .email-form .row-inline input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+  .email-form small { color: var(--text-dim); font-size: 11px; grid-column: 2 / 3; margin-top: -4px; }
+  .button-row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .btn {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .btn:hover  { background: #2a313d; border-color: rgba(167,139,250,0.4); }
+  .btn.primary { background: rgba(167,139,250,0.2); color: var(--accent); border-color: rgba(167,139,250,0.5); }
+  .btn.primary:hover { background: rgba(167,139,250,0.3); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<h1>⚙️ Settings <span class="badge">additive — no recorder logic touched</span></h1>
+<p class="lede">All toggles below are non-intrusive: they affect new runs only, never an in-progress recording.</p>
+
+<!-- ────────── AI ────────── -->
+<div class="panel">
+  <h2>🧠 Local AI Engine</h2>
+  <p class="desc">
+    Powered by a locally-running Ollama daemon. <strong>No data leaves your machine.</strong>
+    When enabled, AI suggests replacement selectors when the recorder's
+    primary + fallback chain fails. Disabling it falls back to the
+    deterministic healer only — every existing test continues to work.
+  </p>
+
+  <div class="row">
+    <div class="info">
+      <div class="label">Enable local AI</div>
+      <div class="hint">Toggles the AI suggest-locator endpoint. The deterministic healer always runs first; AI only fires when ALL recorded fallbacks are exhausted.</div>
+    </div>
+    <div class="control">
+      <label class="switch" for="aiToggle">
+        <input type="checkbox" id="aiToggle" />
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
+  <div class="status" id="aiStatus">checking…</div>
+
+  <div class="install-block" id="aiInstallHint" style="display:none;">
+    <strong>Local AI requires Ollama (one-time setup):</strong>
+    <code>brew install ollama
+ollama pull mistral
+ollama serve &amp;</code>
+    Then come back here and toggle ON. Nothing else changes.
+  </div>
+</div>
+
+<!-- ────────── [ZAC-FIX 8] AI Assistant (Ollama / Mistral) ────────── -->
+<div class="panel" id="zac-ai-assistant-panel">
+  <h2>🤖 AI Assistant (Ollama)</h2>
+  <p class="desc">
+    Cursor-style chat for fixing test code, locally. Toggle the panel anywhere with
+    <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd>. Backed by your own Ollama daemon —
+    no data leaves the machine, no API key required.
+  </p>
+
+  <div class="row">
+    <div class="info">
+      <div class="label">Enable AI Assistant panel</div>
+      <div class="hint">When on, a floating panel is available on Recording, Dashboard and Settings tabs.</div>
+    </div>
+    <div class="control">
+      <label class="switch" for="ollamaEnabled">
+        <input type="checkbox" id="ollamaEnabled" data-zac-bind="ollamaEnabled" />
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <div class="email-form" style="margin-top:8px;">
+    <label for="ollamaEndpoint">Ollama endpoint</label>
+    <input type="text" id="ollamaEndpoint" data-zac-bind="ollamaEndpoint" placeholder="http://localhost:11434" autocomplete="off" />
+
+    <label for="ollamaModel">Model name</label>
+    <input type="text" id="ollamaModel" data-zac-bind="ollamaModel" placeholder="mistral" autocomplete="off" />
+
+    <div class="row-inline" style="margin-top:8px;">
+      <button type="button" id="zacOllamaTestBtn">Test Connection</button>
+      <button type="button" id="zacOllamaSaveBtn">Save</button>
+      <span class="status" id="zacOllamaStatus" style="margin-left:auto;">idle</span>
+    </div>
+  </div>
+
+  <div class="install-block">
+    <strong>Windows / first-run setup:</strong>
+    <code>ollama serve
+ollama pull mistral</code>
+    The endpoint must be HTTP (not HTTPS) — local Ollama does not use TLS.
+    Calls go to localhost from <code>http://localhost:3000</code> so there are no CORS issues.
+  </div>
+</div>
+
+<!-- ────────── Email / SMTP ────────── -->
+<div class="panel">
+  <h2>📧 Email reports</h2>
+  <p class="desc">
+    Send rerun reports and dashboard summaries by email. Powered by SMTP — works with Gmail (app password),
+    Outlook/Office 365, corporate Exchange, internal Postfix relays, etc. <strong>Credentials live only on this server</strong>
+    in <code>config/email.json</code> (gitignored, file mode 0600). The dashboard never sees the password.
+  </p>
+
+  <div class="row">
+    <div class="info">
+      <div class="label">Enable email sending</div>
+      <div class="hint">Master switch. When off, every <code>/api/email/send-*</code> call returns "Email is disabled".</div>
+    </div>
+    <div class="control">
+      <label class="switch"><input type="checkbox" id="emailEnabled" /><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <div class="email-form" id="emailForm">
+    <label for="smtpHost">SMTP host</label>
+    <input type="text" id="smtpHost" placeholder="smtp.gmail.com" autocomplete="off" />
+
+    <label for="smtpPort">Port</label>
+    <div class="row-inline">
+      <input type="number" id="smtpPort" placeholder="587" min="1" max="65535" style="max-width:120px;" />
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-dim);">
+        <input type="checkbox" id="smtpSecure" /> Use TLS (port 465)
+      </label>
+    </div>
+
+    <label for="smtpUser">Username</label>
+    <input type="text" id="smtpUser" placeholder="login@example.com" autocomplete="off" />
+
+    <label for="smtpPassword">Password</label>
+    <input type="password" id="smtpPassword" placeholder="(unchanged)" autocomplete="new-password" />
+
+    <label for="smtpFrom">Default "From"</label>
+    <input type="email" id="smtpFrom" placeholder="zac-bot@example.com" autocomplete="off" />
+
+    <label for="smtpTo">Default "To"</label>
+    <input type="email" id="smtpTo" placeholder="qa-team@example.com (comma-separated for multiple)" autocomplete="off" />
+    <small>Used when the dashboard's "Email report" button is clicked without a per-send override.</small>
+  </div>
+
+  <div class="button-row">
+    <button class="btn primary" id="emailSaveBtn">Save</button>
+    <button class="btn" id="emailVerifyBtn">Verify connection</button>
+    <button class="btn" id="emailTestSendBtn">Send test email</button>
+  </div>
+
+  <div class="status" id="emailStatus">checking…</div>
+</div>
+
+<!-- ────────── Framework default ────────── -->
+<div class="panel">
+  <h2>🧩 Default framework</h2>
+  <p class="desc">
+    The default framework picked when you start a new project from the recorder.
+    Each registered framework has a generator plugin under <code>generators/</code>;
+    see <a href="/markdown-viewer.html?file=generators/PLUGIN.md" target="_blank" style="color:var(--accent);">PLUGIN.md</a> to add a new one.
+  </p>
+  <div class="row">
+    <div class="info">
+      <div class="label">Default framework</div>
+      <div class="hint">Stored in your browser only (localStorage). The recorder reads this when it boots.</div>
+    </div>
+    <div class="control">
+      <select id="defaultFramework">
+        <option value="">loading…</option>
+      </select>
+    </div>
+  </div>
+  <div class="status" id="frameworkStatus"></div>
+</div>
+
+<!-- ────────── Server info ────────── -->
+<div class="panel">
+  <h2>🖥 Server</h2>
+  <p class="desc">Live process serving this UI. Read-only.</p>
+  <div id="serverInfoHost" style="font-family:'SF Mono',Menlo,Consolas,monospace; font-size:12px; color:var(--text-dim);"></div>
+</div>
+
+<p class="footer-note">
+  Settings live <em>per browser</em> via localStorage (default framework) and <em>per server process</em> via runtime calls
+  to <code>/api/ai/toggle</code> (AI on/off). Nothing here writes to disk in your repo.
+  Your existing recordings, generated projects, and rerun reports are untouched.
+</p>
+
+<script src="/settingsStore.js?v=2026-05-17-zacfix"></script>
+<script src="/settings.js?v=2026-05-17-defaultfw"></script>
+<script src="/aiAssistant.js?v=2026-05-17-zacfix"></script>
+<script src="/zacFixes.js?v=2026-05-17-fwsync"></script>
+</body>
+</html>

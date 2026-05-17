@@ -1,0 +1,17 @@
+# Fixtures - recording_assertions
+# Each entry models one captured assertion action that the IDE must
+# round-trip into the resulting Gherkin "Then ..." line.
+
+assertion_actions:
+  - id: assert_text
+    action: { kind: assertText, selector: "#welcome", expectedValue: "Welcome", assertionType: contains }
+    gherkin_must_contain: ["Then", "Welcome"]
+  - id: assert_visible
+    action: { kind: assertVisible, selector: ".cart" }
+    gherkin_must_contain: ["Then", "visible"]
+  - id: assert_value
+    action: { kind: assertValue, selector: "#qty", expectedValue: "3" }
+    gherkin_must_contain: ["Then", "value"]
+  - id: assert_checked
+    action: { kind: assertChecked, selector: "#tos" }
+    gherkin_must_contain: ["Then", "check"]

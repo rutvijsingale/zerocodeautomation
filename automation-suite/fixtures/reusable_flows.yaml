@@ -1,0 +1,24 @@
+# Fixtures - reusable_flows
+
+flows:
+  - name: "Login as user"
+    steps:
+      - { kind: navigate, url: "https://example.com" }
+      - { kind: type, selector: "#username", value: "{{username}}" }
+      - { kind: type, selector: "#password", value: "{{password}}" }
+      - { kind: click, selector: "#login" }
+  - name: "Logout"
+    steps:
+      - { kind: click, selector: "#user-menu" }
+      - { kind: click, selector: "#logout" }
+
+invalid_flows:
+  - id: missing_name
+    payload: { steps: [] }
+    expected_status_set: [400]
+  - id: missing_steps
+    payload: { name: "X" }
+    expected_status_set: [400]
+  - id: steps_not_array
+    payload: { name: "X", steps: "no" }
+    expected_status_set: [400]

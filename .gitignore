@@ -1,0 +1,63 @@
+# [ZAC-FIX] root .gitignore — keep this repo clean.
+# Don't add CWD-specific exclusions here; per-folder .gitignore for those.
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+/tmp/zac-server.log
+
+# Build / test artefacts (Java + JS)
+target/
+**/target/
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
+build/
+
+# IDE / editor
+.idea/
+*.iml
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Runtime, recorder + dashboard outputs
+reports/
+test-results/
+test-temp/
+sample-export/recorded-test-*/
+sample-export/recorded-flow-*/
+
+# Environment + secrets — NEVER commit these
+.env
+.env.local
+config/email.json
+config/credentials.json
+**/credentials.json
+
+# OS junk
+Thumbs.db
+
+# Allure
+allure-results/
+.allure/
+
+# Generated project clutter that ZAC produces from recordings — keep the
+# top-level framework dirs but ignore each individual project's transient
+# outputs.
+generated-projects/*/*/reruns/
+generated-projects/*/*/recordings/
+generated-projects/*/*/locators/healed-locators.json
+generated-projects/*/*/test-plan/
+
+# Backup files
+*.backup
+*.bak

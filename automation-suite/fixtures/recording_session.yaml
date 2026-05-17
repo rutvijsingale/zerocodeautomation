@@ -1,0 +1,21 @@
+# Fixtures - recording_session
+
+valid_starts:
+  - { baseUrl: "about:blank", browserType: "chromium" }
+  - { baseUrl: "about:blank", browserType: "firefox"  }
+  - { baseUrl: "about:blank", browserType: "webkit"   }
+
+invalid_stops:
+  - id: missing_session_id
+    payload: {}
+    expected_status_set: [400]
+  - id: malformed_session_id
+    payload: { sessionId: "not-a-uuid" }
+    expected_status_set: [400]
+  - id: nonexistent_session
+    payload: { sessionId: "00000000-0000-1000-8000-000000000000" }
+    expected_status_set: [404, 400, 500]
+
+ws_invalid_session_ids:
+  - "00000000-0000-1000-8000-000000000000"
+  - "not-a-uuid"

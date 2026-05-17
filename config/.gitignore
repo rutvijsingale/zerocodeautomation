@@ -1,0 +1,5 @@
+# Runtime-written configs. Anything not in this folder's git history is
+# user-secret state (SMTP credentials, model preferences, environment
+# overrides) — keep it out of the repo.
+email.json
+*.local.json

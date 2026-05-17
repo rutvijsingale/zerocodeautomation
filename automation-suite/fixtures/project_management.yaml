@@ -1,0 +1,59 @@
+# Data-driven fixtures for the Project Management suite.
+# Loaded by tests via PyYAML; mirrored as project_management.json for non-Python lanes (k6, JS).
+
+valid_projects:
+  - name: "Checkout Smoke"
+    description: "Critical happy-path checkout flow"
+    baseUrl: "https://example.com"
+    framework: "playwright-ts"
+    browserType: "chromium"
+  - name: "Login Regression"
+    description: "Full login regression sweep"
+    baseUrl: "https://staging.example.com"
+    framework: "playwright-java"
+    browserType: "firefox"
+  - name: "Search API"
+    description: "API-only suite for /search"
+    baseUrl: "https://api.example.com"
+    framework: "selenium-java"
+    browserType: "webkit"
+
+# Negative payloads -- each must produce a 400.
+invalid_projects:
+  - id: "missing_name"
+    payload: { description: "no name field" }
+    expected_status: 400
+  - id: "empty_name"
+    payload: { name: "" }
+    expected_status: 400
+  - id: "whitespace_only_name"
+    payload: { name: "     " }
+    expected_status: 400
+  - id: "non_string_name"
+    payload: { name: 12345 }
+    expected_status: 400
+
+# Edge cases -- accepted, but boundary-tested.
+edge_projects:
+  - id: "max_length_name"
+    payload:
+      name: "P-Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"  # 50 chars, sanitiser cap
+      description: "name at sanitiser length cap"
+  - id: "unicode_name"
+    payload:
+      name: "プロジェクト-α"
+      description: "non-ASCII name; sanitiser will strip but request must succeed"
+  - id: "duplicate_name"
+    payload:
+      name: "Duplicate Project"
+      description: "second create with same name should auto-suffix with timestamp"
+
+# Path-traversal / injection candidates for the projectId param validator.
+malicious_project_ids:
+  - "../../etc/passwd"
+  - "..\\..\\windows\\system32"
+  - "; rm -rf /"
+  - "<script>alert(1)</script>"
+  - "drop table projects;--"
+  - "  spaces in id  "
+  - "with/slash"

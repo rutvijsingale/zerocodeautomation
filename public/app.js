@@ -204,14 +204,40 @@ function debouncedRender() {
 
 
 async function loadConfig(){
-  try{
-    const resp = await fetch('/api/config');
-    const cfg = await resp.json();
+  // [ZAC-FIX] Defensive load — when the rate limiter kicks in or the
+  // server is restarting, we used to render literal "undefined | undefined"
+  // in the header. Now we keep the previous good values, fall back to the
+  // ZacSettings store when present, and retry once after a short delay.
+  const meta = document.getElementById('app-meta');
+  function paint(cfg) {
+    if (!cfg || (cfg.error && !cfg.baseUrl)) return false;
     state.config = cfg;
     document.getElementById('app-title').textContent = cfg.appName || 'Zero-Code Automation IDE';
-    document.getElementById('app-meta').textContent = `Base URL: ${cfg.baseUrl} | Browser: ${cfg.defaultBrowser}`;
-    document.getElementById('baseUrl').value = cfg.baseUrl;
-  }catch(e){ console.warn(e); }
+    if (meta) {
+      const baseUrl = cfg.baseUrl    || (window.ZacSettings && window.ZacSettings.get().defaultBaseUrl)  || '—';
+      const browser = cfg.defaultBrowser || (window.ZacSettings && window.ZacSettings.get().defaultBrowser) || '—';
+      meta.textContent = `Base URL: ${baseUrl} | Browser: ${browser}`;
+    }
+    const bu = document.getElementById('baseUrl');
+    if (bu && cfg.baseUrl) bu.value = cfg.baseUrl;
+    return true;
+  }
+  async function attempt(retry) {
+    try {
+      const resp = await fetch('/api/config');
+      const cfg = await resp.json();
+      if (resp.status === 429 || (cfg && cfg.error)) {
+        if (meta && !meta.textContent) meta.textContent = '(loading config…)';
+        if (retry) setTimeout(() => attempt(false), 4000);
+        return;
+      }
+      paint(cfg);
+    } catch (e) {
+      console.warn('[loadConfig]', e.message);
+      if (retry) setTimeout(() => attempt(false), 4000);
+    }
+  }
+  attempt(true);
 }
 
 // Use common step icon from StepHandlers with fallback
@@ -2568,15 +2594,40 @@ async function startRecording() {
   // No need to require project selection - will be created from form details when recording stops
   const baseUrl = document.getElementById('baseUrl').value || 'about:blank';
   const browserType = document.getElementById('browserType').value || 'chromium';
-  document.getElementById('recordingStatus').textContent = `Starting recording with ${browserType}...`;
-  
+
+  // T2.5 — viewport preset. "maximize" → null (existing default). Otherwise
+  // map preset → {width,height}. Custom reads numeric inputs.
+  const viewportPreset = (document.getElementById('viewportPreset') || {}).value || 'maximize';
+  const VP_PRESETS = {
+    'desktop-1920': { width: 1920, height: 1080 },
+    'laptop-1366':  { width: 1366, height: 768  },
+    'tablet-768':   { width: 768,  height: 1024 },
+    'mobile-375':   { width: 375,  height: 667  },
+    'mobile-390':   { width: 390,  height: 844  },
+  };
+  let viewport = null; // null = maximize / no override
+  if (viewportPreset === 'custom') {
+    const w = Number((document.getElementById('viewportWidth')  || {}).value);
+    const h = Number((document.getElementById('viewportHeight') || {}).value);
+    if (Number.isFinite(w) && Number.isFinite(h) && w >= 200 && h >= 200) {
+      viewport = { width: Math.min(4096, Math.floor(w)), height: Math.min(4096, Math.floor(h)) };
+    }
+  } else if (VP_PRESETS[viewportPreset]) {
+    viewport = VP_PRESETS[viewportPreset];
+  }
+
+  document.getElementById('recordingStatus').textContent =
+    `Starting recording with ${browserType}${viewport ? ` @ ${viewport.width}×${viewport.height}` : ' (maximized)'}...`;
+
   try {
     const resp = await fetch('/api/recording/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        baseUrl, 
-        browserType
+      body: JSON.stringify({
+        baseUrl,
+        browserType,
+        viewport,           // T2.5 — null means existing maximize behavior
+        viewportPreset,     // raw preset name for diagnostics / future use
         // Don't require projectId - will be created from form details when recording stops
       })
     });
@@ -2922,6 +2973,22 @@ async function stopRecording() {
       renderCode();
     }
     
+    // Surface the framework-organized layout location when the backend
+    // mirrored the recording into generated-projects/<framework>/<project>/.
+    if (data.layout) {
+      const statusEl = document.getElementById('recordingStatus');
+      if (statusEl) {
+        const rel = data.layout.recordingDir
+          ? data.layout.recordingDir.split(/[\\\/]generated-projects[\\\/]/).pop()
+          : '';
+        statusEl.innerHTML = `${statusEl.innerHTML || ''}` +
+          `<div style="color: var(--muted); font-size: 11px; margin-top: 6px;">` +
+          `📁 Framework layout: <code>generated-projects/${rel}</code>` +
+          `</div>`;
+      }
+      console.log('[Recording] Mirrored to', data.layout);
+    }
+
     // Try to load step definitions from file if available (optional - file may not exist until export)
     // This is a best-effort attempt - step definitions are already displayed via renderCode()
     if (data.exportPath) {
@@ -3602,6 +3669,44 @@ async function selectProject(projectId) {
       
       const frameworkSelect = document.getElementById('framework');
       if (frameworkSelect) frameworkSelect.value = data.project.framework || 'playwright-java';
+
+      // [ZAC-FIX] FIX B — remember the framework this project was saved with so
+      // zacFixes.js can warn the user before they switch dropdowns.
+      state.currentProjectFramework = data.project.framework || frameworkSelect?.value || null;
+
+      // [ZAC-FIX] FIX E — restore pinned framework version.
+      const fwVersionSelect = document.getElementById('frameworkVersion');
+      if (fwVersionSelect && data.project.frameworkVersion) {
+        const v = data.project.frameworkVersion;
+        const opt = Array.from(fwVersionSelect.options).find(o => o.value === v);
+        if (opt) fwVersionSelect.value = v;
+        else {
+          // Project was saved with a value not in the current list — add it
+          // dynamically so the dropdown still shows the truth.
+          const dyn = document.createElement('option');
+          dyn.value = v;
+          dyn.textContent = v + ' (saved)';
+          fwVersionSelect.appendChild(dyn);
+          fwVersionSelect.value = v;
+        }
+      }
+
+      // [ZAC-FIX] FIX A — restore manual editor edits if present so QA's
+      // hand-written code is what they see when they re-open the project.
+      if (data.project.manualCode) {
+        const mc = data.project.manualCode;
+        const setIfPresent = (id, value) => {
+          if (typeof value !== 'string') return;
+          const el = document.getElementById(id);
+          if (el) el.value = value;
+        };
+        setIfPresent('code-feature', mc.feature);
+        setIfPresent('code-feature-overlay', mc.feature);
+        setIfPresent('code-steps', mc.steps);
+        setIfPresent('code-steps-overlay', mc.steps);
+        setIfPresent('code-selenium', mc.pages);
+        console.log('[ZAC-FIX] FIX A: restored manual edits for project', data.project.id, '(', (mc.editedKeys || []).join(','), ')');
+      }
       
       // Show save and delete buttons
       const saveProjectBtn = document.getElementById('save-project-btn');
@@ -3693,14 +3798,30 @@ async function saveCurrentProject() {
     showToast('No project selected', 'error');
     return;
   }
+
+  // [ZAC-FIX] FIX A — flush any pending manual editor edits BEFORE we save
+  // project.json so the next reload definitely sees them.
+  try {
+    if (typeof window.zacFlushManualEdits === 'function') {
+      await window.zacFlushManualEdits();
+    }
+  } catch (e) { /* non-fatal */ }
   
   try {
-    // Collect current project data from state
+    // Collect current project data from state. We include the raw editor
+    // contents in `manualCode` as a belt-and-suspenders fallback in case the
+    // dedicated /manual-edits endpoint hasn't been called yet.
+    const codeFeature  = document.getElementById('code-feature')?.value
+                      || document.getElementById('code-feature-overlay')?.value;
+    const codeSteps    = document.getElementById('code-steps')?.value
+                      || document.getElementById('code-steps-overlay')?.value;
+    const codeSelenium = document.getElementById('code-selenium')?.value;
     const projectData = {
       id: state.currentProjectId,
       name: state.currentProjectName || document.getElementById('projectName')?.value || 'Untitled Project',
       baseUrl: document.getElementById('baseUrl')?.value || 'http://localhost:3000',
       framework: document.getElementById('framework')?.value || 'playwright-java',
+      frameworkVersion: document.getElementById('frameworkVersion')?.value || 'latest-stable',
       browserType: state.config.defaultBrowser || 'chromium',
       steps: state.steps,
       backgroundSteps: state.backgroundSteps,
@@ -3709,7 +3830,13 @@ async function saveCurrentProject() {
       pages: [], // Will be populated from locators
       locators: [], // Will be loaded from locator service
       testData: state.bddOptions.examples || [],
-      reusableFlows: []
+      reusableFlows: [],
+      manualCode: (codeFeature || codeSteps || codeSelenium) ? {
+        feature: codeFeature,
+        steps:   codeSteps,
+        pages:   codeSelenium,
+        updatedAt: new Date().toISOString(),
+      } : null,
     };
     
     const response = await fetch(`/api/projects/${state.currentProjectId}/save`, {
@@ -3840,9 +3967,48 @@ async function deleteCurrentProject() {
   }
 }
 
+/**
+ * Populate framework <select> elements from /api/frameworks so the UI stays
+ * in sync with the backend registry. Falls back silently to whatever static
+ * options are already in the markup if the call fails (offline / boot order).
+ */
+async function loadFrameworkRegistry() {
+  try {
+    const res = await fetch('/api/frameworks');
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = Array.isArray(data && data.frameworks) ? data.frameworks : [];
+    const ids = ['framework', 'stepDefsFramework'];
+    for (const selectId of ids) {
+      const sel = document.getElementById(selectId);
+      if (!sel) continue;
+      const previous = sel.value;
+      const visible = list.filter((f) => f.uiVisible !== false);
+      if (visible.length === 0) continue;
+      sel.innerHTML = visible
+        .map((f) => `<option value="${f.id}">${f.label || f.id}</option>`) 
+        .join('');
+      if (visible.some((f) => f.id === previous)) sel.value = previous;
+    }
+  } catch (err) {
+    console.warn('[FrameworkRegistry] could not load /api/frameworks:', err && err.message);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadConfig();
-  
+  loadFrameworkRegistry();
+
+  // T2.5 — viewport preset: show/hide the custom width/height row when
+  // the user picks "Custom…", and wire its initial state on load.
+  const vpSel = document.getElementById('viewportPreset');
+  const vpRow = document.getElementById('viewportCustomRow');
+  if (vpSel && vpRow) {
+    const sync = () => { vpRow.style.display = (vpSel.value === 'custom') ? 'flex' : 'none'; };
+    vpSel.addEventListener('change', sync);
+    sync();
+  }
+
   // Load projects on startup
   loadProjects();
   
@@ -5227,15 +5393,33 @@ document.addEventListener('DOMContentLoaded', () => {
           
           // Always show detailed results if available (for regular execution)
           if (result.results && result.results.length > 0 && !result.scenarioOutline) {
+            // Pre-compute heal summary so we can flag the whole run when the
+            // self-healing chain rescued any step. Mirrors what mvn test does
+            // via SELECTOR_FALLBACKS_BY_PRIMARY in the generated framework.
+            const healedSteps = result.results.filter(r => r && r.healed);
+            const healedBanner = healedSteps.length > 0
+              ? `<div style="color: #f59e0b; font-size: 11px; margin-bottom: 8px;">
+                   🩹 Self-healing kicked in on ${healedSteps.length} step${healedSteps.length === 1 ? '' : 's'} —
+                   primary locator was stale, run continued via fallback chain.
+                 </div>`
+              : '';
+
             const resultsHtml = result.results.map((r, i) => {
               const icon = r.success ? '✅' : '❌';
               const color = r.success ? '#10b981' : '#ef4444';
               const step = state.steps[i];
               const stepDesc = step ? getStepLabel(step) : (r.step || r.kind || 'Unknown');
               const duration = r.duration ? ` (${r.duration}ms)` : '';
+              const healLine = r.healed
+                ? `<div style="color: #f59e0b; font-size: 11px; margin-left: 24px; margin-top: 2px;">
+                     🩹 Healed: primary <code>${escapeHtml(r.primarySelector || '')}</code> →
+                     <code>${escapeHtml(r.healedVia || '')}</code>
+                   </div>`
+                : '';
               return `<div style="padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
                 <span style="color: ${color}; font-weight: 600;">${icon}</span> 
                 <span style="color: var(--text);">[${i + 1}/${totalSteps}] ${stepDesc}${duration}</span>
+                ${healLine}
                 ${r.error ? `<div style="color: #ef4444; font-size: 11px; margin-left: 24px; margin-top: 2px;">${r.error}</div>` : ''}
               </div>`;
             }).join('');
@@ -5243,6 +5427,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <div style="color: var(--muted); font-size: 11px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2);">
                 📊 Step-by-step results (${result.cancelled ? 'execution cancelled' : `all ${totalSteps} steps executed`}):
               </div>
+              ${healedBanner}
               ${resultsHtml}
             </div>`;
           } else if (result.error && !result.scenarioOutline) {

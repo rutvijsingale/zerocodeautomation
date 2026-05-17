@@ -8,7 +8,16 @@ export class BrowserService {
     this.sessionTimeout = parseInt(process.env.SESSION_TIMEOUT) || 30 * 60 * 1000; // 30 minutes
   }
 
-  async createSession(baseUrl = 'about:blank', browserType = 'chromium') {
+  async createSession(baseUrl = 'about:blank', browserType = 'chromium', options = {}) {
+    // T2.5 — `options.viewport` (optional): { width, height } to force a
+    // specific viewport size instead of the default "maximize". Passed
+    // through from the recorder UI's viewport-preset dropdown.
+    const requestedViewport = (options && options.viewport &&
+      Number.isFinite(options.viewport.width) && Number.isFinite(options.viewport.height) &&
+      options.viewport.width >= 200 && options.viewport.height >= 200)
+      ? { width: Math.floor(options.viewport.width), height: Math.floor(options.viewport.height) }
+      : null;
+
     // Check session limit
     if (this.activeSessions.size >= this.maxSessions) {
       throw new Error('Maximum number of concurrent recording sessions reached');
@@ -131,9 +140,11 @@ export class BrowserService {
 
     try {
       // For headed mode, use viewport: null to let Playwright use full available window
-      // Combined with --start-maximized, this ensures maximum screen usage
-      // For headless mode, we'd use a fixed viewport, but we're always headed for recording
-      let viewportConfig = null; // null = use full available window size
+      // Combined with --start-maximized, this ensures maximum screen usage.
+      // T2.5 — if the caller passed an explicit viewport (e.g. a tablet
+      // preset), use that instead so the recording reflects the device
+      // the user wants to test.
+      let viewportConfig = requestedViewport; // null → full window (maximized); object → forced size
       let detectedViewport = null;
       
       // Try to detect screen size for logging purposes (optional, won't fail if it doesn't work)
@@ -182,7 +193,33 @@ export class BrowserService {
       // Inject recording script at context level (persists across all pages)
       await this.injectRecordingScript(context, sessionId);
 
+      // ── T1.8 Multi-tab handlers ─────────────────────────────────
+      // When the user opens a new tab via Cmd-click / window.open / etc.,
+      // Playwright fires `context.on('page', …)`. Wire the SAME
+      // setupPageEventHandlers (scroll, navigation, download, popup,
+      // close) to that new page or the recorder is blind to anything the
+      // user does there. The context-level addInitScript already covers
+      // click/type/select/check/etc. but the page-level Node hooks are
+      // per-page and must be attached explicitly.
+      //
+      // We use a WeakSet (`__zacWired`) to track pages we've already
+      // bound to, so the first page (which createSession attaches to
+      // directly) doesn't get double-wired when context.on('page')
+      // fires for it.
+      const __zacWired = new WeakSet();
+      context.on('page', async (newPage) => {
+        try {
+          if (__zacWired.has(newPage)) return;
+          __zacWired.add(newPage);
+          console.log(`[BrowserService] context.on('page') fired — wiring handlers to new tab (${newPage.url()})`);
+          await this.setupPageEventHandlers(newPage, sessionId);
+        } catch (e) {
+          console.warn(`[BrowserService] failed to attach handlers to new tab:`, e.message);
+        }
+      });
+
       const page = await context.newPage();
+      __zacWired.add(page); // mark first page as wired before setup below
       
       // Verify actual viewport after page creation
       try {
@@ -332,7 +369,8 @@ export class BrowserService {
           
           const menuItems = [
             { label: '🌐 Navigate To', kind: 'navigate', separator: true },
-            { label: '✓ Assert Visible', kind: 'assertVisible' },
+            { label: '📌 Save as Locator', kind: 'saveLocator', separator: true },
+            { label: '✓ Assert Visible', kind: 'assertVisible', separator: true },
             { label: '✗ Assert Not Visible', kind: 'assertNotVisible' },
             { label: '📝 Assert Text Contains', kind: 'assertText' },
             { label: '🏷️ Assert Attribute', kind: 'assertAttribute' },
@@ -345,7 +383,6 @@ export class BrowserService {
           ];
           
           menuItems.forEach((item, index) => {
-            // Add separator if needed
             if (item.separator && index > 0) {
               const separator = document.createElement('div');
               separator.style.cssText = 'height: 1px; background: #2a3441; margin: 6px 0;';
@@ -368,9 +405,12 @@ export class BrowserService {
               if (item.kind === 'navigate') {
                 console.log('[Recording Script] Navigate selected');
                 handleNavigate();
+              } else if (item.kind === 'saveLocator') {
+                console.log('[Recording Script] Save as Locator selected');
+                handleSaveLocator();
               } else {
                 console.log('[Recording Script] Assertion selected:', item.kind);
-              handleAssertion(item.kind);
+                handleAssertion(item.kind);
               }
               hideContextMenu();
             };
@@ -1187,7 +1227,104 @@ export class BrowserService {
             console.error('Failed to send assertion:', error);
           }
         }
-        
+
+        // Right-click → "Save as Locator". Persists the current element
+        // (with its full fallback chain) directly into the project's
+        // locators.json via /api/recording/:sessionId/save-locator.
+        async function handleSaveLocator() {
+          if (!currentElement) {
+            console.warn('[Recording Script] ⚠️ No element selected for Save as Locator');
+            return;
+          }
+
+          const targetElement = getClickableElement(currentElement) || currentElement;
+          let primarySelector = getElementSelector(targetElement);
+          if (!primarySelector) {
+            alert('[ZAC] Could not determine a stable selector for this element.');
+            return;
+          }
+
+          let strategies = [];
+          try {
+            strategies = (typeof getAllSelectorStrategies === 'function')
+              ? (getAllSelectorStrategies(targetElement) || [])
+              : [];
+          } catch (err) {
+            console.warn('[Recording Script] getAllSelectorStrategies failed:', err);
+          }
+          const fallbackSelectors = strategies
+            .map((s) => (s && s.value) ? s.value : null)
+            .filter((v) => v && v !== primarySelector);
+
+          const guessedPage = (function () {
+            try {
+              const path = (window.location && window.location.pathname) || '/';
+              const segs = path.split('/').filter(Boolean);
+              const tail = segs.length ? segs[segs.length - 1] : 'home';
+              const base = tail.replace(/\.[a-zA-Z0-9]+$/, '').replace(/[^a-zA-Z0-9]+/g, ' ').trim() || 'Home';
+              return base.replace(/\s+(.)/g, (_, c) => c.toUpperCase()).replace(/^./, (c) => c.toUpperCase()) + 'Page';
+            } catch (e) { return 'HomePage'; }
+          })();
+
+          const guessedElement = (function () {
+            try {
+              if (targetElement.id) return targetElement.id.replace(/[^a-zA-Z0-9]+/g, '_');
+              const aria = targetElement.getAttribute && targetElement.getAttribute('aria-label');
+              if (aria) return aria.replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase();
+              const txt = (targetElement.textContent || '').trim().slice(0, 30);
+              if (txt) return txt.replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase();
+              return (targetElement.tagName || 'element').toLowerCase() + 'Element';
+            } catch (e) { return 'element'; }
+          })();
+
+          const pageInput = window.prompt('Save Locator: Page name', guessedPage);
+          if (pageInput === null) return;
+          const elementInput = window.prompt('Save Locator: Element name', guessedElement);
+          if (elementInput === null) return;
+
+          const pageName = (pageInput || '').trim() || guessedPage;
+          const elementName = (elementInput || '').trim() || guessedElement;
+
+          const SAVE_URL = 'http://localhost:${port}/api/recording/' + SESSION_ID + '/save-locator';
+          try {
+            const resp = await fetch(SAVE_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                pageName,
+                elementName,
+                selector: primarySelector,
+                fallbackSelectors,
+                description: pageName + '.' + elementName,
+              }),
+            });
+            const body = await resp.json().catch(() => ({}));
+            if (resp.ok) {
+              console.log('[Recording Script] 📌 Locator saved:', body);
+              showToast('📌 Locator saved: ' + pageName + '.' + elementName);
+            } else {
+              console.error('[Recording Script] Save locator failed:', resp.status, body);
+              alert('[ZAC] Save locator failed: ' + (body && body.error ? body.error : resp.statusText));
+            }
+          } catch (err) {
+            console.error('[Recording Script] Save locator network error:', err);
+            alert('[ZAC] Save locator network error: ' + err.message);
+          }
+        }
+
+        // Lightweight in-page toast (no-op if a host site already defines one)
+        function showToast(message) {
+          try {
+            const id = 'zac-toast-' + Date.now();
+            const el = document.createElement('div');
+            el.id = id;
+            el.textContent = message;
+            el.style.cssText = 'position:fixed;right:20px;bottom:20px;background:#1a1f2e;color:#5aa9ff;border:1px solid #2a3441;border-radius:8px;padding:12px 16px;font:13px -apple-system,BlinkMacSystemFont,sans-serif;z-index:999999;box-shadow:0 4px 20px rgba(0,0,0,0.5);';
+            document.body.appendChild(el);
+            setTimeout(() => { try { el.remove(); } catch (e) {} }, 2500);
+          } catch (e) { /* ignore */ }
+        }
+
         // Handle navigate action (context-level) - shows selection dialog
         async function handleNavigate() {
           if (!currentElement) {
@@ -2205,6 +2342,347 @@ export class BrowserService {
           }).catch(err => console.error('Failed to send keyPress:', err));
         }, true);
         
+        // ============================================================
+        // TIER 1 — additional action capture (T1.1, T1.2, T1.3, T1.5,
+        // T1.6, T1.7, T1.10). Each new listener follows the same pattern
+        // as the click/type/select listeners above: event handler → build
+        // payload with the action kind → POST to API_URL. All registered with
+        // capture=true so we see events before any page handler can call
+        // stopPropagation. Inserted ABOVE the navigation block so the
+        // navigation poller stays the last thing in the IIFE.
+        // ============================================================
+
+        // Generic "send to recorder" helper for the new handlers. Keeps
+        // each listener body small and uniform.
+        function __zacSend(action) {
+          try {
+            fetch(API_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(Object.assign({ sessionId: SESSION_ID, timestamp: Date.now() }, action)),
+            }).catch(function (e) { console.warn('[Recording] send failed for', action.kind, e); });
+          } catch (e) {
+            console.warn('[Recording] send threw for', action.kind, e);
+          }
+        }
+
+        // ── T1.1 Hover capture ────────────────────────────────────────
+        // Debounced per-selector so a single hover doesn't emit a flood of
+        // mouseover bubbles. Limited to interactive-looking targets so we
+        // don't capture every passing pixel as a step.
+        var __zacHoverLast = { sel: null, t: 0 };
+        var __ZAC_HOVER_DEBOUNCE_MS = 800;
+        document.addEventListener('mouseover', function (e) {
+          if (!e.target || !e.target.tagName) return;
+          var tag = e.target.tagName.toLowerCase();
+          if (tag === 'html' || tag === 'body') return;
+          var isInteractive =
+            tag === 'a' || tag === 'button' ||
+            e.target.getAttribute('role') === 'button' ||
+            e.target.getAttribute('role') === 'menuitem' ||
+            e.target.hasAttribute('aria-haspopup') ||
+            (e.target.title && e.target.title.length > 0) ||
+            (e.target.dataset && (e.target.dataset.tooltip || e.target.dataset.toggle));
+          if (!isInteractive) return;
+          var sel = getElementSelector(e.target);
+          if (!sel) return;
+          var now = Date.now();
+          if (__zacHoverLast.sel === sel && (now - __zacHoverLast.t) < __ZAC_HOVER_DEBOUNCE_MS) return;
+          __zacHoverLast = { sel: sel, t: now };
+          __zacSend({ kind: 'hover', selector: sel });
+        }, true);
+
+        // ── T1.2 Drag-and-drop capture ────────────────────────────────
+        // Pair dragstart + drop. Emit one dragDrop step at drop time
+        // carrying both source + target selectors. The action's primary
+        // selector points at the source so existing locator-healing
+        // strategies still apply.
+        var __zacDragSource = null;
+        document.addEventListener('dragstart', function (e) {
+          if (!e.target || !e.target.tagName) return;
+          var sel = getElementSelector(e.target);
+          if (sel) __zacDragSource = { selector: sel, t: Date.now() };
+        }, true);
+        document.addEventListener('drop', function (e) {
+          if (!__zacDragSource) return;
+          var targetSel = e.target ? getElementSelector(e.target) : null;
+          if (!targetSel) { __zacDragSource = null; return; }
+          __zacSend({
+            kind: 'dragDrop',
+            selector: __zacDragSource.selector,
+            sourceSelector: __zacDragSource.selector,
+            targetSelector: targetSel,
+          });
+          __zacDragSource = null;
+        }, true);
+
+        // ── T1.3 File-upload capture (input[type=file]) ───────────────
+        // Capture file NAMES + sizes only — not bytes. The IDE's action
+        // stream isn't a file pipe and replay engines accept names/paths.
+        document.addEventListener('change', function (e) {
+          if (!e.target || e.target.tagName !== 'INPUT' || e.target.type !== 'file') return;
+          var sel = getElementSelector(e.target);
+          if (!sel) return;
+          var files = e.target.files
+            ? Array.prototype.slice.call(e.target.files).map(function (f) { return { name: f.name, size: f.size, type: f.type }; })
+            : [];
+          __zacSend({
+            kind: 'fileUpload',
+            selector: sel,
+            files: files,
+            value: files.map(function (f) { return f.name; }).join(', '),
+          });
+        }, true);
+
+        // ── T1.5 + T1.6 Semantic checkbox / radio ─────────────────────
+        // The existing change handler above only handles <select>. This
+        // ADDITIONAL change handler emits explicit check/uncheck/
+        // selectRadio steps for INPUT toggles (instead of the user
+        // ending up with an opaque click).
+        document.addEventListener('change', function (e) {
+          if (!e.target || e.target.tagName !== 'INPUT') return;
+          var t = e.target.type;
+          var sel = getElementSelector(e.target);
+          if (!sel) return;
+          if (t === 'checkbox') {
+            __zacSend({
+              kind: e.target.checked ? 'check' : 'uncheck',
+              selector: sel,
+              value: !!e.target.checked,
+              name: e.target.name || null,
+            });
+          } else if (t === 'radio' && e.target.checked) {
+            __zacSend({
+              kind: 'selectRadio',
+              selector: sel,
+              value: e.target.value || '',
+              name: e.target.name || null,
+            });
+          }
+        }, true);
+
+        // ── T1.7 Custom dropdown / ARIA combobox capture ──────────────
+        // Modern UIs (Material, Ant, headlessui, custom) are NOT <select>
+        // so the change handler can't see them. When the user clicks an
+        // item inside a role=listbox/menu, emit a select step naming
+        // the owning combobox + the picked option text.
+        document.addEventListener('click', function (e) {
+          if (!e.target || !e.target.closest) return;
+          var opt = e.target.closest(
+            '[role="option"], [role="menuitem"], li[role="option"], li[role="menuitem"]'
+          );
+          if (!opt) return;
+          var list = opt.closest('[role="listbox"], [role="menu"]');
+          var combobox = null;
+          if (list && list.id) {
+            combobox = document.querySelector('[aria-controls="' + list.id + '"]');
+          }
+          if (!combobox) combobox = opt.closest('[role="combobox"]');
+          if (!combobox) return; // Not a combobox interaction → existing click handler covers it
+          var cbSel = getElementSelector(combobox);
+          if (!cbSel) return;
+          var optionText = (opt.textContent || '').trim().slice(0, 200);
+          __zacSend({
+            kind: 'select',
+            selector: cbSel,
+            value: optionText,
+            selectedText: optionText,
+            customDropdown: true,
+          });
+        }, true);
+
+        // ── T3.5 Shadow DOM piercing ─────────────────────────────────
+        // When the click target lives inside a shadow root, the bare
+        // selector wont match because document.querySelector doesnt
+        // pierce shadow boundaries. Walk up getRootNode() from the
+        // event target and emit a Playwright shadow-piercing chain
+        // (zac-card >> button.primary) that DOES pierce. Filed as a
+        // sidecar shadowSelector on the click action so existing
+        // primary selector logic stays intact.
+        function __zacShadowChain(target) {
+          if (!target || !target.getRootNode) return null;
+          const chain = [];
+          let cur = target;
+          let safety = 8;
+          while (cur && safety-- > 0) {
+            const root = cur.getRootNode && cur.getRootNode();
+            if (!root || root === document) break;
+            // Inside a shadow root — push a relative selector for cur
+            // and jump up to the host's enclosing root.
+            const inHost = root.host;
+            if (!inHost) break;
+            // Local selector inside this shadow root: prefer id, then
+            // [data-testid], then tag.
+            let local;
+            if (cur.id) local = '#' + cur.id;
+            else if (cur.getAttribute && cur.getAttribute('data-testid')) {
+              local = '[data-testid="' + cur.getAttribute('data-testid') + '"]';
+            } else {
+              local = cur.tagName ? cur.tagName.toLowerCase() : '*';
+            }
+            chain.unshift(local);
+            // Now walk the host up to the next shadow root or document.
+            const hostId = inHost.id ? '#' + inHost.id : (inHost.tagName ? inHost.tagName.toLowerCase() : '*');
+            chain.unshift(hostId);
+            chain.unshift('>>'); // Playwright shadow piercing combinator
+            cur = inHost;
+          }
+          if (chain.length === 0) return null;
+          // Drop the leading '>>' if it ended up first.
+          if (chain[0] === '>>') chain.shift();
+          return chain.join(' ').replace(/\s+>>\s+/g, ' >> ');
+        }
+        document.addEventListener('click', function (e) {
+          if (!e.target || !e.target.getRootNode) return;
+          const root = e.target.getRootNode();
+          if (!root || root === document) return; // not in shadow DOM
+          const shadowSel = __zacShadowChain(e.target);
+          if (!shadowSel) return;
+          __zacSend({
+            kind: 'click',
+            selector: shadowSel,
+            shadowSelector: shadowSel,
+            shadowDom: true,
+          });
+        }, true);
+
+        // ── T3.6 iframe deep recording ──────────────────────────────
+        // The browser recording script runs at TOP level. When the user
+        // clicks INSIDE an iframe, the click event fires INSIDE THE FRAME
+        // and never reaches our top-level listener. We can't add cross-
+        // origin frame listeners, but we CAN attach to same-origin
+        // frames via document.querySelectorAll('iframe') + frame's
+        // contentDocument. We do it lazily on each click hint.
+        function __zacAttachFrameRecorders() {
+          try {
+            const frames = document.querySelectorAll('iframe, frame');
+            frames.forEach(function (f) {
+              if (f.__zacFrameWired) return;
+              let doc = null;
+              try { doc = f.contentDocument; } catch (_e) { /* cross-origin */ }
+              if (!doc) return;
+              f.__zacFrameWired = true;
+              const frameId = f.id || f.name || (f.src ? f.src.slice(0, 80) : 'frame-' + Date.now());
+              doc.addEventListener('click', function (ev) {
+                try {
+                  const sel = (typeof getElementSelector === 'function')
+                    ? getElementSelector(ev.target)
+                    : (ev.target && ev.target.id ? '#' + ev.target.id : (ev.target && ev.target.tagName ? ev.target.tagName.toLowerCase() : null));
+                  if (!sel) return;
+                  __zacSend({
+                    kind: 'click',
+                    selector: sel,
+                    iframe: true,
+                    frameId: frameId,
+                    frameSelector: f.id ? '#' + f.id : (f.name ? '[name="' + f.name + '"]' : 'iframe'),
+                  });
+                } catch (_clickErr) { /* swallow */ }
+              }, true);
+              doc.addEventListener('input', function (ev) {
+                try {
+                  if (!ev.target || (ev.target.tagName !== 'INPUT' && ev.target.tagName !== 'TEXTAREA')) return;
+                  const sel = (typeof getElementSelector === 'function')
+                    ? getElementSelector(ev.target)
+                    : (ev.target.id ? '#' + ev.target.id : ev.target.tagName.toLowerCase());
+                  if (!sel) return;
+                  __zacSend({
+                    kind: 'type',
+                    selector: sel,
+                    value: ev.target.value || '',
+                    iframe: true,
+                    frameId: frameId,
+                    frameSelector: f.id ? '#' + f.id : (f.name ? '[name="' + f.name + '"]' : 'iframe'),
+                  });
+                } catch (_typeErr) { /* swallow */ }
+              }, true);
+            });
+          } catch (_outerErr) { /* swallow */ }
+        }
+        // Wire on page load + every click (cheap idempotent re-scan
+        // via the .__zacFrameWired marker).
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', __zacAttachFrameRecorders);
+        } else {
+          __zacAttachFrameRecorders();
+        }
+        document.addEventListener('click', __zacAttachFrameRecorders, true);
+
+        // ── T2.8 Auto-suggested smart assertions ─────────────────────
+        // After every meaningful interaction (click, type-blur), propose a
+        // soft assertion the user MIGHT want to add as a step:
+        //   • after a click on a link/button → assertVisible on the
+        //     element OR assertText if it has stable visible text
+        //   • after a type-blur on an input → assertValue
+        // These are sent with kind:'assertion-suggested' (NOT a real step
+        // kind) and a suggested:true flag. The server route handler
+        // stashes them on session.suggestions; the IDE can pull them via
+        // /api/recording/:id/suggestions and let the user promote/dismiss.
+        function __zacEmitAssertion(kind, target, extras) {
+          if (!target) return;
+          const sel = getElementSelector(target);
+          if (!sel) return;
+          const action = Object.assign({
+            kind: 'assertion-suggested',
+            suggestedKind: kind,
+            selector: sel,
+            suggested: true,
+          }, extras || {});
+          __zacSend(action);
+        }
+        document.addEventListener('click', function (e) {
+          if (!e.target || !e.target.tagName) return;
+          const t = e.target;
+          const tag = t.tagName.toLowerCase();
+          if (tag === 'html' || tag === 'body') return;
+          // Only suggest after clicks on interactive triggers — avoids
+          // proposing an assertion for every passing click.
+          const isInteractive =
+            tag === 'a' || tag === 'button' ||
+            t.getAttribute('role') === 'button' ||
+            t.getAttribute('role') === 'menuitem' ||
+            (t.type && (t.type === 'submit' || t.type === 'button'));
+          if (!isInteractive) return;
+          const text = (t.textContent || '').trim();
+          if (text && text.length > 0 && text.length < 80) {
+            __zacEmitAssertion('assertText', t, { expectedValue: text });
+          } else {
+            __zacEmitAssertion('assertVisible', t, {});
+          }
+        }, true);
+        document.addEventListener('blur', function (e) {
+          if (!e.target || e.target.tagName !== 'INPUT') return;
+          const t = e.target;
+          if (t.type === 'password' || t.type === 'file' || t.type === 'checkbox' || t.type === 'radio') return;
+          const v = t.value || '';
+          if (v && v.length < 200) {
+            __zacEmitAssertion('assertValue', t, { expectedValue: v });
+          }
+        }, true);
+
+        // ── T1.10 Modifier-key chords ────────────────────────────────
+        // Existing keydown handler skips non-special keys. Capture chords
+        // (Ctrl+S, Cmd+A, Shift+Tab, etc.) separately so they become
+        // first-class steps. Fire only on keydown of the non-modifier key.
+        document.addEventListener('keydown', function (e) {
+          var k = e.key || e.code;
+          if (k === 'Control' || k === 'Alt' || k === 'Shift' || k === 'Meta') return;
+          var mods = [];
+          if (e.ctrlKey)  mods.push('Control');
+          if (e.metaKey)  mods.push('Meta');
+          if (e.altKey)   mods.push('Alt');
+          if (e.shiftKey) mods.push('Shift');
+          if (mods.length === 0) return;
+          var chord = mods.concat([k.length === 1 ? k.toUpperCase() : k]).join('+');
+          var sel = getElementSelector(e.target) || 'body';
+          __zacSend({
+            kind: 'keyPress',
+            key: chord,
+            value: chord,
+            selector: sel,
+            modifiers: mods,
+          });
+        }, true);
+
         // Record navigation
         let lastUrl = window.location.href;
         setInterval(() => {
@@ -3175,7 +3653,8 @@ export class BrowserService {
             
             const menuItems = [
               { label: '🌐 Navigate To', kind: 'navigate', separator: true },
-              { label: '✓ Assert Visible', kind: 'assertVisible' },
+              { label: '📌 Save as Locator', kind: 'saveLocator', separator: true },
+              { label: '✓ Assert Visible', kind: 'assertVisible', separator: true },
               { label: '✗ Assert Not Visible', kind: 'assertNotVisible' },
               { label: '📝 Assert Text Contains', kind: 'assertText' },
               { label: '🏷️ Assert Attribute', kind: 'assertAttribute' },
@@ -3211,7 +3690,16 @@ export class BrowserService {
                 if (item.kind === 'navigate') {
                   console.log('[Recording Script] Navigate selected');
                   handleNavigate();
-                } else {
+                  hideContextMenu();
+                  return;
+                }
+                if (item.kind === 'saveLocator') {
+                  console.log('[Recording Script] Save as Locator selected (menu v2)');
+                  handleSaveLocator();
+                  hideContextMenu();
+                  return;
+                }
+                {
                   console.log('[Recording Script] Assertion selected:', item.kind);
                   
                   // Normalize to clickable element for assertions
@@ -3411,6 +3899,11 @@ export class BrowserService {
           let lastScrollTime = 0;
           let scrollTargetElement = null;
           let scrollTargetDetectionTimeout = null;
+          // Track previous scroll position so we can compute direction (up/down/left/right)
+          // for each emitted scroll event. The recorder annotates this on the action
+          // payload so replay + test-plan generation can describe scrolls naturally.
+          let prevScrollX = window.scrollX || window.pageXOffset || 0;
+          let prevScrollY = window.scrollY || window.pageYOffset || 0;
           
           // Track scroll events
           window.addEventListener('scroll', (e) => {
@@ -3479,25 +3972,42 @@ export class BrowserService {
                     scrollMode = 'element';
                   }
                   
+                  // Compute direction relative to the previous emitted scroll. We
+                  // prefer vertical direction since real users scroll vertically,
+                  // but record the horizontal axis when it dominates.
+                  const dy = scrollY - prevScrollY;
+                  const dx = scrollX - prevScrollX;
+                  const direction = Math.abs(dy) >= Math.abs(dx)
+                    ? (dy >= 0 ? 'down' : 'up')
+                    : (dx >= 0 ? 'right' : 'left');
+                  prevScrollX = scrollX;
+                  prevScrollY = scrollY;
+
                   // Build scroll action with element data
                   const scrollData = {
                     sessionId: sessionId,
                     kind: 'scroll',
                     scrollX: scrollX,
                     scrollY: scrollY,
+                    direction: direction,
+                    reason: 'element_search',
+                    pageUrl: window.location && window.location.href ? window.location.href : null,
                     viewportHeight: viewportHeight,
                     viewportWidth: viewportWidth,
                     scroll: {
                       mode: scrollMode,
                       y: scrollY,
+                      direction: direction,
+                      reason: 'element_search',
                       locatorCandidates: locatorCandidates,
-                      primaryLocatorIndex: primaryLocatorIndex
+                      primaryLocatorIndex: primaryLocatorIndex,
+                      targetElementVisibleAfter: true
                     },
                     targetElementMetadata: metadata,
                     timestamp: Date.now()
                   };
-                  
-                  console.log('[Recording Script] 📜 Scroll action:', scrollData);
+
+                  console.log('[Scroll] 📜 Recorded ' + direction + ' to y=' + scrollY + ' (target=' + (metadata && metadata.tag ? metadata.tag : 'unknown') + ')');
                   
                   // Send scroll action to server
                   fetch(apiUrl, {
@@ -3524,22 +4034,36 @@ export class BrowserService {
                 scrollMode = 'top';
               }
               
+              // Compute direction (no target element form).
+              const dy2 = scrollY - prevScrollY;
+              const dx2 = scrollX - prevScrollX;
+              const direction2 = Math.abs(dy2) >= Math.abs(dx2)
+                ? (dy2 >= 0 ? 'down' : 'up')
+                : (dx2 >= 0 ? 'right' : 'left');
+              prevScrollX = scrollX;
+              prevScrollY = scrollY;
+
               // Build scroll action without element
               const scrollData = {
                 sessionId: sessionId,
                 kind: 'scroll',
                 scrollX: scrollX,
                 scrollY: scrollY,
+                direction: direction2,
+                reason: 'page_explore',
+                pageUrl: window.location && window.location.href ? window.location.href : null,
                 viewportHeight: viewportHeight,
                 viewportWidth: viewportWidth,
                 scroll: {
                   mode: scrollMode,
-                  y: scrollY
+                  y: scrollY,
+                  direction: direction2,
+                  reason: 'page_explore'
                 },
                 timestamp: Date.now()
               };
-              
-              console.log('[Recording Script] 📜 Scroll action:', scrollData);
+
+              console.log('[Scroll] 📜 Recorded ' + direction2 + ' to y=' + scrollY + ' (mode=' + scrollMode + ')');
               
               // Send scroll action to server
               fetch(apiUrl, {
@@ -3974,6 +4498,99 @@ export class BrowserService {
               }
             }
             
+            // ════════════════════════════════════════════════════════
+            // TIER 3 — additional locator strategies (T3.4, T3.7)
+            // ════════════════════════════════════════════════════════
+
+            // T3.7 — Dynamic-ID handling. Many React/Angular apps emit
+            // ids like "btn-1234" or "field-xyz-456" that change every
+            // build. If the element's id contains a numeric tail (or a
+            // hash-looking suffix), also generate a stable
+            // contains(@id,'prefix') / [id^="prefix"] selector keyed
+            // off the prefix, so the next build still matches.
+            if (element.id) {
+              const m = String(element.id).match(/^([a-zA-Z][a-zA-Z_-]+?)[-_]?(?:\d+|[a-f0-9]{6,})$/);
+              if (m && m[1] && m[1].length >= 3) {
+                const prefix = m[1];
+                const cssPrefix = '[id^="' + prefix + '"]';
+                const xpathPrefix = '//*[starts-with(@id, \'' + prefix.replace(/'/g, "\\'") + '\')]';
+                const cssU = checkSelectorUniqueness(cssPrefix, element);
+                if (cssU.count <= 5) {
+                  const codeExamples = generateCodeExamples(cssPrefix, 'attribute');
+                  candidates.push({
+                    selector: cssPrefix,
+                    xpath: xpathPrefix,
+                    type: 'dynamic-id-prefix',
+                    unique: cssU.unique,
+                    matchCount: cssU.count,
+                    stabilityScore: cssU.unique ? 70 : 55,
+                    description: 'dynamic id prefix: ' + prefix,
+                    seleniumExample: codeExamples.seleniumExample,
+                    playwrightExample: codeExamples.playwrightExample
+                  });
+                }
+              }
+            }
+
+            // T3.4 — Following / preceding sibling XPath.
+            // Useful when the recorded element has no stable attributes
+            // BUT a sibling with stable text/role exists. Common pattern:
+            // a label sits next to an unmarked input. Generate
+            // //label[text()='Email']/following-sibling::input[1].
+            if (element.parentElement) {
+              const sibs = Array.from(element.parentElement.children);
+              const myIdx = sibs.indexOf(element);
+              // Look at the immediately preceding sibling for an anchor.
+              if (myIdx > 0) {
+                const prev = sibs[myIdx - 1];
+                const prevText = (prev.textContent || '').trim();
+                if (prevText && prevText.length > 0 && prevText.length < 60 && /\S/.test(prevText)) {
+                  const escTxt = prevText.replace(/'/g, "\\'");
+                  const xpathSel = 'xpath=//' + prev.tagName.toLowerCase() +
+                    "[normalize-space(.)='" + escTxt + "']/following-sibling::" + tag + '[1]';
+                  const u = checkSelectorUniqueness(xpathSel, element);
+                  if (u.count <= 2) {
+                    const codeExamples = generateCodeExamples(xpathSel, 'xpath');
+                    candidates.push({
+                      selector: xpathSel,
+                      type: 'sibling-xpath',
+                      unique: u.unique,
+                      matchCount: u.count,
+                      stabilityScore: 60,
+                      description: 'following-sibling of "' + prevText.slice(0, 30) + '"',
+                      seleniumExample: codeExamples.seleniumExample,
+                      playwrightExample: codeExamples.playwrightExample
+                    });
+                  }
+                }
+              }
+              // Look at the immediately following sibling too (less common
+              // but useful when the input precedes its label).
+              if (myIdx >= 0 && myIdx < sibs.length - 1) {
+                const next = sibs[myIdx + 1];
+                const nextText = (next.textContent || '').trim();
+                if (nextText && nextText.length > 0 && nextText.length < 60 && /\S/.test(nextText)) {
+                  const escTxt = nextText.replace(/'/g, "\\'");
+                  const xpathSel = 'xpath=//' + next.tagName.toLowerCase() +
+                    "[normalize-space(.)='" + escTxt + "']/preceding-sibling::" + tag + '[1]';
+                  const u = checkSelectorUniqueness(xpathSel, element);
+                  if (u.count <= 2) {
+                    const codeExamples = generateCodeExamples(xpathSel, 'xpath');
+                    candidates.push({
+                      selector: xpathSel,
+                      type: 'sibling-xpath',
+                      unique: u.unique,
+                      matchCount: u.count,
+                      stabilityScore: 58,
+                      description: 'preceding-sibling of "' + nextText.slice(0, 30) + '"',
+                      seleniumExample: codeExamples.seleniumExample,
+                      playwrightExample: codeExamples.playwrightExample
+                    });
+                  }
+                }
+              }
+            }
+
             // 10. XPath (stability: 40) - last resort
             if (element.parentElement) {
               const siblings = Array.from(element.parentElement.children).filter(el => el.tagName === element.tagName);
@@ -3996,7 +4613,53 @@ export class BrowserService {
                 }
               }
             }
-            
+
+            // T3.8 — Cross-selector duplicate detection.
+            // Two DIFFERENT selectors might resolve to the SAME element.
+            // That's actually fine — but two different selectors that
+            // resolve to DIFFERENT elements is a flag we want surfaced
+            // so the user knows the candidate pool isn't aliasing the
+            // same node. We detect by querying each candidate and
+            // hashing the matched element's outerHTML; collisions mean
+            // candidates are equivalent and we can drop low-quality
+            // duplicates.
+            try {
+              const seenTargets = new Map(); // outerHTML hash → first selector index
+              const drop = new Set();
+              for (let ci = 0; ci < candidates.length; ci++) {
+                const c = candidates[ci];
+                if (!c || !c.selector) continue;
+                let target = null;
+                try {
+                  target = document.querySelector(c.selector);
+                } catch (_e) {
+                  // Playwright-extended selectors (xpath=, text=, role=)
+                  // may not be valid CSS. Skip equivalence detection for
+                  // those — keep them in the pool unconditionally.
+                  continue;
+                }
+                if (!target) continue;
+                const sig = (target.outerHTML || '').slice(0, 256);
+                if (seenTargets.has(sig)) {
+                  // Duplicate target. Keep the higher stabilityScore.
+                  const firstIdx = seenTargets.get(sig);
+                  if ((candidates[firstIdx].stabilityScore || 0) < (c.stabilityScore || 0)) {
+                    drop.add(firstIdx);
+                    seenTargets.set(sig, ci);
+                  } else {
+                    drop.add(ci);
+                  }
+                } else {
+                  seenTargets.set(sig, ci);
+                }
+              }
+              if (drop.size > 0) {
+                for (let i = candidates.length - 1; i >= 0; i--) {
+                  if (drop.has(i)) candidates.splice(i, 1);
+                }
+              }
+            } catch (_dedupeErr) { /* best-effort dedup; keep candidates as-is on failure */ }
+
             // Sort candidates: unique first, then by stability score, then by match count
             candidates.sort((a, b) => {
               if (a.unique !== b.unique) return a.unique ? -1 : 1;
@@ -4889,6 +5552,66 @@ export class BrowserService {
       
       // Don't destroy session immediately - actions might still be in flight
       // The cleanup timer will handle it if no more activity
+    });
+
+    // ── T1.4 File-download capture ──────────────────────────────────
+    // Playwright's page.on('download') fires whenever the browser starts
+    // a download. We push a `download` action carrying the suggested
+    // filename + the URL Playwright reports — that's enough for replay
+    // engines to assert "a download named X happened" without us having
+    // to actually save the bytes to disk.
+    page.on('download', async (download) => {
+      try {
+        const session = this.getSession(sessionId);
+        if (!session) return;
+        const action = {
+          kind: 'download',
+          filename: download.suggestedFilename ? download.suggestedFilename() : null,
+          url: download.url ? download.url() : null,
+          timestamp: Date.now(),
+        };
+        session.actions.push(action);
+        console.log(`[Recording] ⬇️ Download recorded: ${action.filename || action.url}`);
+        if (session.ws && session.ws.readyState === 1) {
+          try {
+            session.ws.send(JSON.stringify({ type: 'action', data: action, normalized: true, totalActions: session.actions.length }));
+          } catch (e) { /* ws blip — non-fatal */ }
+        }
+      } catch (e) {
+        console.warn('[Recording] download capture failed:', e.message);
+      }
+    });
+
+    // ── T1.9 Popup window handling ──────────────────────────────────
+    // Capture window.open / target=_blank / window.popup as a step AND
+    // attach the same recorder handlers to the new page so interactions
+    // inside the popup are captured too. The init script (T1.1–T1.10)
+    // already runs on every page in the context — we only need to wire
+    // setupPageEventHandlers (scroll, navigation, etc.) to the popup.
+    page.on('popup', async (popup) => {
+      try {
+        const session = this.getSession(sessionId);
+        if (session) {
+          const action = {
+            kind: 'popup',
+            url: popup.url ? popup.url() : null,
+            timestamp: Date.now(),
+          };
+          session.actions.push(action);
+          console.log(`[Recording] 🪟 Popup recorded: ${action.url}`);
+          if (session.ws && session.ws.readyState === 1) {
+            try {
+              session.ws.send(JSON.stringify({ type: 'action', data: action, normalized: true, totalActions: session.actions.length }));
+            } catch (e) { /* ws blip — non-fatal */ }
+          }
+        }
+        // Attach the same per-page handlers (scroll, navigation, close,
+        // download, popup) to the popup so it's a first-class recordable
+        // surface, not a black hole.
+        await this.setupPageEventHandlers(popup, sessionId);
+      } catch (e) {
+        console.warn('[Recording] popup handler failed:', e.message);
+      }
     });
 
     // Handle console messages for debugging

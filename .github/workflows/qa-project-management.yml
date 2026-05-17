@@ -1,0 +1,218 @@
+name: QA - project_management
+
+on:
+  pull_request:
+    paths:
+      - "automation-suite/**"
+      - "routes/**"
+      - "services/**"
+      - "public/**"
+      - "middleware/**"
+      - "server.js"
+      - ".github/workflows/qa-project-management.yml"
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ZAC_ENV: ci
+  ZAC_UI_BASE_URL: http://localhost:3000
+  ZAC_API_BASE_URL: http://localhost:3000/api
+  ZAC_HEADLESS: "true"
+  ZAC_HEALER_ENABLED: "true"
+  ALLURE_RESULTS_DIR: automation-suite/reports/allure-results
+
+jobs:
+  api-and-ui:
+    name: API + UI + A11y + Visual + Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---- Start the ZAC server ----
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install server deps
+        run: npm ci
+
+      - name: Start ZAC server (background)
+        run: |
+          nohup node server.js > zac-server.log 2>&1 &
+          echo $! > zac-server.pid
+
+      - name: Wait for /api/health
+        run: |
+          for i in {1..40}; do
+            if curl -fsS http://localhost:3000/api/health >/dev/null; then
+              echo "ZAC server up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "ZAC server failed to start"; cat zac-server.log; exit 1
+
+      # ---- Setup Python test stack ----
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: automation-suite/requirements.txt
+
+      - name: Install Python deps
+        working-directory: automation-suite
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        working-directory: automation-suite
+        run: python -m playwright install --with-deps ${{ matrix.browser }}
+
+      # ---- Run the suites ----
+      - name: API tests
+        working-directory: automation-suite
+        env:
+          ZAC_BROWSER: ${{ matrix.browser }}
+        run: pytest tests/api -m "api and not flaky_quarantine"
+
+      - name: UI tests
+        working-directory: automation-suite
+        env:
+          ZAC_BROWSER: ${{ matrix.browser }}
+        run: pytest tests/ui -m "ui" --browser ${{ matrix.browser }}
+
+      - name: Accessibility tests
+        if: matrix.browser == 'chromium'
+        working-directory: automation-suite
+        run: pytest tests/accessibility -m "accessibility" --browser chromium
+
+      - name: Visual regression
+        if: matrix.browser == 'chromium'
+        working-directory: automation-suite
+        run: pytest tests/visual -m "visual" --browser chromium
+
+      - name: Security tests
+        if: matrix.browser == 'chromium'
+        working-directory: automation-suite
+        run: pytest tests/security -m "security and not flaky_quarantine"
+
+      # ---- Stop server ----
+      - name: Stop ZAC server
+        if: always()
+        run: |
+          if [ -f zac-server.pid ]; then kill "$(cat zac-server.pid)" || true; fi
+
+      # ---- Reporting ----
+      - name: Upload Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-${{ matrix.browser }}
+          path: automation-suite/reports/allure-results
+          retention-days: 14
+
+      - name: Upload Healer suggestions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: healer-suggestions-${{ matrix.browser }}
+          path: automation-suite/reports/healer
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Generate Allure HTML report
+        if: always() && matrix.browser == 'chromium'
+        uses: simple-elf/allure-report-action@v1.9
+        with:
+          allure_results: automation-suite/reports/allure-results
+          allure_report:  automation-suite/reports/allure-report
+          gh_pages:       gh-pages
+          keep_reports:   20
+
+      - name: Upload Allure HTML
+        if: always() && matrix.browser == 'chromium'
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-html
+          path: automation-suite/reports/allure-report
+          retention-days: 14
+          if-no-files-found: ignore
+
+  performance:
+    name: k6 performance (smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: api-and-ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install server deps
+        run: npm ci
+
+      - name: Start ZAC server
+        run: |
+          nohup node server.js > zac-server.log 2>&1 &
+          echo $! > zac-server.pid
+          for i in {1..40}; do
+            curl -fsS http://localhost:3000/api/health >/dev/null && exit 0
+            sleep 2
+          done
+          cat zac-server.log; exit 1
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Run k6 (reduced VUs in CI)
+        env:
+          K6_VUS: "20"
+          K6_DURATION: "30s"
+          K6_P95_THRESHOLD_MS: "800"
+        run: |
+          mkdir -p automation-suite/reports/k6
+          k6 run \
+            --summary-export=automation-suite/reports/k6/summary.json \
+            automation-suite/perf/project_management.k6.js
+
+      - name: Stop ZAC server
+        if: always()
+        run: |
+          if [ -f zac-server.pid ]; then kill "$(cat zac-server.pid)" || true; fi
+
+      - name: Upload k6 artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-results
+          path: automation-suite/reports/k6
+          retention-days: 14

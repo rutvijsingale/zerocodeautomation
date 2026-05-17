@@ -1,0 +1,17 @@
+# Fixtures - append_steps (POST /api/projects/:id/append-steps + generate-files)
+
+initial_steps:
+  - { kind: navigate, url: "https://example.com" }
+
+appended_steps:
+  - { kind: type, selector: "#username", value: "alice" }
+  - { kind: type, selector: "#password", value: "Secret123!" }
+  - { kind: click, selector: "#login" }
+
+invalid_appends:
+  - id: empty_steps
+    payload: { steps: [] }
+    expected_status_set: [400]
+  - id: missing_steps
+    payload: {}
+    expected_status_set: [400]

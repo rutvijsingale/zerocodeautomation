@@ -7,10 +7,108 @@
   <link rel="stylesheet" href="/styles.css"/>
 </head>
 <body>
-  <header>
-    <h1 id="app-title">🚀 Zero‑Code Automation IDE</h1>
-    <div id="app-meta"></div>
+  <!--
+    Tab-strip header (Recorder | Dashboard).
+    Implementation note: the recorder lives in tab-recorder; the dashboard
+    is loaded inside an iframe in tab-dashboard so the recorder's existing
+    DOM/JS isn't touched. Switching tabs only flips a single class on the
+    panes; the recorder stays mounted (its WebSocket session and any
+    in-progress recording survive a tab switch).
+  -->
+  <style>
+    .nav-tabs {
+      display: flex;
+      gap: 0;
+      background: rgba(13, 17, 23, 0.95);
+      border-bottom: 2px solid var(--border, #2a313d);
+      padding: 0 24px;
+    }
+    .nav-tabs button {
+      background: transparent;
+      border: none;
+      color: var(--muted, #9aa4b2);
+      padding: 14px 22px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      border-bottom: 3px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      font-family: inherit;
+    }
+    .nav-tabs button:hover { color: var(--text, #e8ecf2); }
+    .nav-tabs button.active {
+      color: var(--accent, #5aa9ff);
+      border-bottom-color: var(--accent, #5aa9ff);
+    }
+    .nav-tabs .spacer { flex: 1; }
+    .nav-tabs .ai-badge {
+      align-self: center;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 12px;
+    }
+    .nav-tabs .ai-badge.on  { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
+    .nav-tabs .ai-badge.off { background: rgba(154, 164, 178, 0.15); color: var(--muted, #9aa4b2); }
+    /* Tab visibility — use !important to defeat any cached/third-party
+       CSS that might inadvertently un-hide an inactive pane. The whole
+       point of the tab strip is exactly one pane visible at a time. */
+    .tab-pane         { display: none !important; }
+    .tab-pane.active  { display: block !important; }
+
+    /* Both iframe-driven tabs need full-viewport height so embedded
+       content gets the entire pane. */
+    .tab-pane.dashboard-pane.active,
+    .tab-pane.settings-pane.active {
+      height: calc(100vh - 110px); /* header (~46) + tab strip (~50) + breathing room */
+      width: 100%;
+      padding: 0;
+      margin: 0;
+    }
+    .tab-pane iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    /* Per-tab accent color on the active button so users can SEE which
+       pane is currently mounted at a glance. The tab strip itself also
+       gets a tinted top border so even a quick peripheral glance tells
+       you which mode you're in. */
+    .nav-tabs button[data-tab="recorder"].active   { color: #4ade80; border-bottom-color: #4ade80; }
+    .nav-tabs button[data-tab="dashboard"].active  { color: #5aa9ff; border-bottom-color: #5aa9ff; }
+    .nav-tabs button[data-tab="settings"].active   { color: #a78bfa; border-bottom-color: #a78bfa; }
+    body.tab-recorder  .nav-tabs { box-shadow: inset 0 -3px 0 rgba(74, 222, 128, 0.15); }
+    body.tab-dashboard .nav-tabs { box-shadow: inset 0 -3px 0 rgba(90, 169, 255, 0.15); }
+    body.tab-settings  .nav-tabs { box-shadow: inset 0 -3px 0 rgba(167, 139, 250, 0.15); }
+  </style>
+
+  <header style="padding: 14px 24px; border-bottom: 1px solid var(--border, #2a313d); background: linear-gradient(180deg, #161a22, #11141b); display: flex; justify-content: space-between; align-items: center;">
+    <h1 id="app-title" style="margin:0; font-size:18px; font-weight:600;">🚀 Zero‑Code Automation IDE</h1>
+    <div id="app-meta" style="font-size:12px; color: var(--muted, #9aa4b2);"></div>
   </header>
+
+  <nav class="nav-tabs" id="appTabs" role="tablist">
+    <button class="active" data-tab="recorder"  role="tab" aria-selected="true">🎬 Recording</button>
+    <button             data-tab="dashboard"  role="tab" aria-selected="false">📊 Dashboard</button>
+    <button             data-tab="settings"   role="tab" aria-selected="false">⚙️ Settings</button>
+    <span class="spacer"></span>
+    <span class="ai-badge off" id="aiBadge" title="Local AI status (Ollama)">AI: …</span>
+  </nav>
+
+  <!--
+    Tab-strip wiring (Recording / Dashboard / Settings) + AI status badge.
+    Lives in an external file because Helmet's default CSP
+    (script-src 'self' with no unsafe-inline) silently rejects inline
+    script tags. With the handler inline, clicking the Dashboard tab
+    used to appear to do nothing because this handler never bound.
+  -->
+  <script src="/app-tabs.js?v=2026-05-10-csp"></script>
+
+  <!-- ────────── Tab pane: RECORDER ────────── -->
+  <div id="tab-pane-recorder" class="tab-pane active">
 
   <!-- Full-screen recording overlay -->
   <div id="recordingOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100vh; background: var(--bg); z-index: 1000; overflow-y: auto;">
@@ -83,9 +181,26 @@
           <select id="framework" style="width: 100%; padding: 10px; border-radius: 8px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 14px;">
             <option value="playwright-java">Playwright + Java + Cucumber</option>
             <option value="selenium-java">Selenium WebDriver + Java + Cucumber</option>
+            <option value="selenium-testng">Selenium WebDriver + Java + TestNG</option>
+            <option value="playwright-typescript">Playwright + TypeScript + Cucumber</option>
+            <option value="playwright-javascript">Playwright + JavaScript + Cucumber</option>
           </select>
           <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 4px;">
             Choose your automation framework for code generation
+          </small>
+        </label>
+        <!-- [ZAC-FIX] FIX E — pinned framework version baked into the pom.xml /
+             package.json on save. "latest-stable" is recommended; older entries
+             keep working older recordings. -->
+        <label>
+          Framework Version
+          <select id="frameworkVersion" style="width: 100%; padding: 10px; border-radius: 8px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 14px;">
+            <option value="latest-stable">latest-stable (recommended)</option>
+            <option value="lts">lts (long-term support)</option>
+            <option value="custom">custom — see project files</option>
+          </select>
+          <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 4px;">
+            Pinned to the project; written to <code>pom.xml</code> / <code>package.json</code> on save.
           </small>
         </label>
         <label>
@@ -98,6 +213,29 @@
           </select>
           <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 4px;">
             Select browser for code generation
+          </small>
+        </label>
+        <!-- T2.5 Responsive viewport presets — applied to BOTH the recorder
+             and the rerun browser. "Maximize" keeps the existing default
+             behaviour (viewport: null + --start-maximized). -->
+        <label>
+          Viewport / Device
+          <select id="viewportPreset" style="width: 100%; padding: 10px; border-radius: 8px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 14px;">
+            <option value="maximize">🖥 Maximize (default)</option>
+            <option value="desktop-1920">🖥 Desktop 1920×1080</option>
+            <option value="laptop-1366">💻 Laptop 1366×768</option>
+            <option value="tablet-768">📱 Tablet 768×1024 (iPad-portrait)</option>
+            <option value="mobile-375">📱 Mobile 375×667 (iPhone SE)</option>
+            <option value="mobile-390">📱 Mobile 390×844 (iPhone 14)</option>
+            <option value="custom">⚙ Custom…</option>
+          </select>
+          <div id="viewportCustomRow" style="display:none; margin-top:6px; gap:6px; align-items:center;">
+            <input id="viewportWidth"  type="number" min="200" max="4096" placeholder="width"  style="width:50%; padding:8px; border-radius:6px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size:13px;" />
+            <span style="color: var(--muted); padding: 0 6px;">×</span>
+            <input id="viewportHeight" type="number" min="200" max="4096" placeholder="height" style="width:50%; padding:8px; border-radius:6px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size:13px;" />
+          </div>
+          <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 4px;">
+            Applied to the recording browser AND any rerun (so the test sees the same layout your recording captured).
           </small>
         </label>
         <label>
@@ -163,23 +301,46 @@
           <input id="elementName" placeholder="Element Name (e.g., LoginButton, SearchField)" style="font-size: 13px;"/>
         </div>
         <select id="stepKind">
-          <option value="navigate">Navigate</option>
-          <option value="click">Click</option>
-          <option value="type">Type</option>
-          <option value="assertText">Assert Text Contains</option>
-          <option value="assertVisible">Assert Visible</option>
-          <option value="assertNotVisible">Assert Not Visible</option>
-          <option value="assertAttribute">Assert Attribute</option>
-          <option value="assertCount">Assert Count</option>
-          <option value="assertValue">Assert Value</option>
-          <option value="assertEnabled">Assert Enabled</option>
-          <option value="assertDisabled">Assert Disabled</option>
-          <option value="assertChecked">Assert Checked</option>
-          <option value="assertNotChecked">Assert Not Checked</option>
-          <option value="waitFor">Wait</option>
-          <option value="waitForSelector">Wait For Selector</option>
-          <option value="screenshot">Take Screenshot</option>
-          <option value="apiCall">API Call</option>
+          <optgroup label="Navigation">
+            <option value="navigate">Navigate</option>
+          </optgroup>
+          <optgroup label="Mouse">
+            <option value="click">Click</option>
+            <option value="doubleClick">Double Click</option>
+            <option value="hover">Hover</option>
+            <option value="dragDrop">Drag &amp; Drop</option>
+          </optgroup>
+          <optgroup label="Input">
+            <option value="type">Type</option>
+            <option value="select">Select (dropdown)</option>
+            <option value="check">Check (checkbox)</option>
+            <option value="uncheck">Uncheck (checkbox)</option>
+            <option value="selectRadio">Select Radio</option>
+            <option value="fileUpload">Upload File</option>
+            <option value="keyPress">Key Press / Chord</option>
+          </optgroup>
+          <optgroup label="Page">
+            <option value="scroll">Scroll</option>
+            <option value="close">Close Tab</option>
+          </optgroup>
+          <optgroup label="Assertions">
+            <option value="assertText">Assert Text Contains</option>
+            <option value="assertVisible">Assert Visible</option>
+            <option value="assertNotVisible">Assert Not Visible</option>
+            <option value="assertAttribute">Assert Attribute</option>
+            <option value="assertCount">Assert Count</option>
+            <option value="assertValue">Assert Value</option>
+            <option value="assertEnabled">Assert Enabled</option>
+            <option value="assertDisabled">Assert Disabled</option>
+            <option value="assertChecked">Assert Checked</option>
+            <option value="assertNotChecked">Assert Not Checked</option>
+          </optgroup>
+          <optgroup label="Waits &amp; Misc">
+            <option value="waitFor">Wait</option>
+            <option value="waitForSelector">Wait For Selector</option>
+            <option value="screenshot">Take Screenshot</option>
+            <option value="apiCall">API Call</option>
+          </optgroup>
         </select>
         <input id="selector" placeholder="css/xpath/role (e.g., text=Login or #username)"/>
         <input id="value" placeholder="Value/Text/URL/Attribute Name"/>
@@ -568,7 +729,29 @@
     </div>
   </footer>
 
+  <script src="/settingsStore.js?v=2026-05-17-zacfix"></script>
   <script src="/stepHandlers.js"></script>
   <script src="/app.js"></script>
+  <script src="/aiAssistant.js?v=2026-05-17-zacfix"></script>
+  <script src="/zacFixes.js?v=2026-05-17-fwsync"></script>
+  </div><!-- /#tab-pane-recorder -->
+
+  <!-- ────────── Tab pane: DASHBOARD ────────── -->
+  <div id="tab-pane-dashboard" class="tab-pane dashboard-pane">
+    <!--
+      iframe loads the dashboard EAGERLY (src set right here) so the
+      first click on the Dashboard tab is instantaneous. Earlier we
+      tried lazy-mounting via JS, but that caused user confusion when
+      the iframe stayed empty if the JS hadn't run yet. The dashboard's
+      auto-refresh is cheap (every 30s for stats, every 2s for live)
+      so eager loading has no measurable cost.
+    -->
+    <iframe id="dashboardFrame" src="/dashboard.html?v=2026-05-10-sidebar" title="ZAC Dashboard"></iframe>
+  </div>
+
+  <!-- ────────── Tab pane: SETTINGS ────────── -->
+  <div id="tab-pane-settings" class="tab-pane settings-pane">
+    <iframe id="settingsFrame" src="/settings.html" title="ZAC Settings"></iframe>
+  </div>
 </body>
 </html>

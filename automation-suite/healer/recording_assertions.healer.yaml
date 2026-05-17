@@ -1,0 +1,20 @@
+suite: recording_assertions
+version: 1
+settings:
+  enabled: true
+  promote_after_heals: 3
+  fail_on_no_strategy: true
+  report_dir: reports/healer
+  attach_to_allure: true
+
+strategy_priority: [testid, id, role, label, text, css, xpath]
+
+# Inherits the recording_session locators; only the live-feature surface
+# is exercised here.
+locators:
+  - name: live_feature_overlay
+    primary: { testid: code-feature-overlay }
+    fallbacks: [{ id: code-feature-overlay }, { css: "textarea#code-feature-overlay" }]
+  - name: live_steps_overlay
+    primary: { testid: code-steps-overlay }
+    fallbacks: [{ id: code-steps-overlay }, { css: "textarea#code-steps-overlay" }]

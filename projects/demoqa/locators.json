@@ -1,0 +1,147 @@
+{
+  "elements_button": {
+    "chain": [
+      "xpath=//a[normalize-space(.)='Forms']/preceding-sibling::a[1]",
+      "text=\"Elements\""
+    ]
+  },
+  "text_box": {
+    "chain": [
+      "text=\"Text Box\""
+    ]
+  },
+  "elements_text_box_check_box_radio_button_web_tables_buttons_links_broken": {
+    "chain": [
+      "#root",
+      "text=\"Elements Text BoxCheck BoxRadio ButtonWeb TablesBu\""
+    ]
+  },
+  "full_name_field": {
+    "chain": [
+      "#userName"
+    ]
+  },
+  "name_example_com_field": {
+    "chain": [
+      "#userEmail",
+      "input.mr-sm-2.form-control"
+    ]
+  },
+  "current_address": {
+    "chain": [
+      "#currentAddress"
+    ]
+  },
+  "permanent_address": {
+    "chain": [
+      "#permanentAddress",
+      "textarea.form-control"
+    ]
+  },
+  "submit_button": {
+    "chain": [
+      "#submit",
+      "text=\"Submit\""
+    ]
+  },
+  "check_box_button": {
+    "chain": [
+      "text=\"Check Box\""
+    ]
+  },
+  "select_home": {
+    "chain": [
+      "[aria-label=\"Select Home\"]",
+      "xpath=//span[3]",
+      "xpath=//span[normalize-space(.)='Home']/preceding-sibling::span[1]"
+    ]
+  },
+  "alerts_frame_windows": {
+    "chain": [
+      "xpath=//div[normalize-space(.)='Browser WindowsAlertsFramesNested FramesModal Dialogs']/preceding-sibling::span[1]",
+      "text=\"Alerts, Frame & Windows\""
+    ]
+  },
+  "frames_button": {
+    "chain": [
+      "text=\"Frames\""
+    ]
+  },
+  "widgets": {
+    "chain": [
+      "text=\"Widgets\""
+    ]
+  },
+  "accordian_button": {
+    "chain": [
+      "text=\"Accordian\""
+    ]
+  },
+  "lorem_ipsum_is_simply_dummy_text": {
+    "chain": [
+      "text=\"Lorem Ipsum is simply dummy text of the printing a\""
+    ]
+  },
+  "auto_complete_button": {
+    "chain": [
+      "text=\"Auto Complete\""
+    ]
+  },
+  "div_auto_complete_input_container": {
+    "chain": [
+      "div.auto-complete__input-container"
+    ]
+  },
+  "auto_complete_multiple_input": {
+    "chain": [
+      "#autoCompleteMultipleInput"
+    ]
+  },
+  "auto_complete_single_input": {
+    "chain": [
+      "#autoCompleteSingleInput",
+      "input.auto-complete__input"
+    ]
+  },
+  "red": {
+    "chain": [
+      "#react-select-3-option-0",
+      "role=option >> text=\"Red\"",
+      "text=\"Red\""
+    ]
+  },
+  "div_auto_complete_control_auto_complete_control_is_focused_auto_complete_control_menu_is_open": {
+    "chain": [
+      "div.auto-complete__control.auto-complete__control--is-focused.auto-complete__control--menu-is-open"
+    ]
+  },
+  "green": {
+    "chain": [
+      "#react-select-6-option-0",
+      "role=option >> text=\"Green\"",
+      "text=\"Green\"",
+      "xpath=//div[normalize-space(.)='Black']/preceding-sibling::div[1]"
+    ]
+  },
+  "select_menu": {
+    "chain": [
+      "text=\"Select Menu\""
+    ]
+  },
+  "mr": {
+    "chain": [
+      "#react-select-5-option-0-1",
+      "text=\"Mr.\"",
+      "xpath=//div[normalize-space(.)='Dr.']/following-sibling::div[1]",
+      "xpath=//div[normalize-space(.)='Mrs.']/preceding-sibling::div[1]"
+    ]
+  },
+  "blue": {
+    "chain": [
+      "#react-select-6-option-1",
+      "text=\"Blue\"",
+      "xpath=//div[normalize-space(.)='Green']/following-sibling::div[1]",
+      "xpath=//div[normalize-space(.)='Black']/preceding-sibling::div[1]"
+    ]
+  }
+}

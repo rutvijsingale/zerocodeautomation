@@ -451,6 +451,12 @@ function generateJavaStepDefinitions(framework, stepDefMap, groupedActions, base
   if (selectorMap.size > 0) {
     lines.push('    // Selector lookup map: maps element descriptions to actual selectors with fallbacks');
     lines.push('    private static final java.util.Map<String, java.util.List<String>> SELECTOR_MAP = new java.util.HashMap<>();');
+    // Parallel map keyed by the primary selector value. Lets the lowercase-c
+    // step (`iClick(String selector)`) discover its recorded fallback chain at
+    // runtime so a brittle primary selector still resolves via the secondary
+    // candidates the recorder captured. This is the runtime arm of the
+    // self-healing locator system.
+    lines.push('    private static final java.util.Map<String, java.util.List<String>> SELECTOR_FALLBACKS_BY_PRIMARY = new java.util.HashMap<>();');
     lines.push('    static {');
     selectorMap.forEach((selectorData, description) => {
       // Escape quotes in selectors and description
@@ -459,11 +465,15 @@ function generateJavaStepDefinitions(framework, stepDefMap, groupedActions, base
       const escapedSelectors = allSelectors.map(s => 
         s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
       );
-      lines.push(`        java.util.List<String> selectors_${description.replace(/[^a-zA-Z0-9]/g, '_')} = new java.util.ArrayList<>();`);
+      const varSafe = description.replace(/[^a-zA-Z0-9]/g, '_');
+      lines.push(`        java.util.List<String> selectors_${varSafe} = new java.util.ArrayList<>();`);
       escapedSelectors.forEach(sel => {
-        lines.push(`        selectors_${description.replace(/[^a-zA-Z0-9]/g, '_')}.add("${sel}");`);
+        lines.push(`        selectors_${varSafe}.add("${sel}");`);
       });
-      lines.push(`        SELECTOR_MAP.put("${escapedDesc}", selectors_${description.replace(/[^a-zA-Z0-9]/g, '_')});`);
+      lines.push(`        SELECTOR_MAP.put("${escapedDesc}", selectors_${varSafe});`);
+      // Index the same list by the primary selector value so a feature file
+      // that calls "I click <primary>" can recover the fallbacks at runtime.
+      lines.push(`        SELECTOR_FALLBACKS_BY_PRIMARY.put("${escapedSelectors[0]}", selectors_${varSafe});`);
     });
     lines.push('    }');
     lines.push('');
@@ -1018,42 +1028,55 @@ function generateJavaStepDefinitions(framework, stepDefMap, groupedActions, base
           lines.push('            }');
           lines.push('        }');
         } else {
-          lines.push('        // Detect if click causes navigation (pagination, links, etc.)');
-          lines.push('        String urlBeforeClick = getDriver().getCurrentUrl();');
-          lines.push('        ');
-          lines.push('        // Perform the click');
-          lines.push('        getDriver().findElement(By.cssSelector(selector)).click();');
-          lines.push('        ');
-          lines.push('        // Wait a bit for potential navigation to start');
-          lines.push('        try {');
-          lines.push('            Thread.sleep(200);');
-          lines.push('        } catch (InterruptedException e) {');
-          lines.push('            Thread.currentThread().interrupt();');
-          lines.push('        }');
-          lines.push('        ');
-          lines.push('        // Check if navigation occurred');
-          lines.push('        String urlAfterClick = getDriver().getCurrentUrl();');
-          lines.push('        if (!urlBeforeClick.equals(urlAfterClick)) {');
-          lines.push('            // Navigation occurred - wait for page to load');
-          lines.push('            System.out.println("[Click] Navigation detected after clicking, waiting for page to load...");');
-          lines.push('            // Wait for page to load (check for document.readyState)');
-          lines.push('            org.openqa.selenium.support.ui.WebDriverWait wait = new org.openqa.selenium.support.ui.WebDriverWait(getDriver(), java.time.Duration.ofSeconds(30));');
-          lines.push('            wait.until(webDriver -> ((org.openqa.selenium.JavascriptExecutor) webDriver).executeScript("return document.readyState").equals("complete"));');
-          lines.push('            // Wait for dynamic content to load (pagination, AJAX, etc.)');
-          lines.push('            try {');
-          lines.push('                Thread.sleep(1000);');
-          lines.push('            } catch (InterruptedException e) {');
-          lines.push('                Thread.currentThread().interrupt();');
-          lines.push('            }');
-          lines.push('            System.out.println("[Click] Page loaded after navigation to: " + getDriver().getCurrentUrl());');
-          lines.push('        } else {');
-          lines.push('            // No navigation - just wait a bit for any dynamic updates');
-          lines.push('            try {');
-          lines.push('                Thread.sleep(500);');
-          lines.push('            } catch (InterruptedException e) {');
-          lines.push('                Thread.currentThread().interrupt();');
-          lines.push('            }');
-          lines.push('        }');
+          // Selenium: route through tryClickWithFallback when the recorder
+          // captured fallback selectors for this primary, otherwise fall back
+          // to single-shot. This is the runtime arm of self-healing locators.
+          if (selectorMap.size > 0) {
+            lines.push('        // Self-healing: walk the recorded fallback chain when available');
+            lines.push('        java.util.List<String> selectors = SELECTOR_FALLBACKS_BY_PRIMARY.get(selector);');
+            lines.push('        if (selectors == null || selectors.isEmpty()) {');
+            lines.push('            selectors = new java.util.ArrayList<>();');
+            lines.push('            selectors.add(selector);');
+            lines.push('        }');
+            lines.push('        tryClickWithFallback(selectors, selector);');
+          } else {
+            lines.push('        // Detect if click causes navigation (pagination, links, etc.)');
+            lines.push('        String urlBeforeClick = getDriver().getCurrentUrl();');
+            lines.push('        ');
+            lines.push('        // Perform the click');
+            lines.push('        getDriver().findElement(By.cssSelector(selector)).click();');
+            lines.push('        ');
+            lines.push('        // Wait a bit for potential navigation to start');
+            lines.push('        try {');
+            lines.push('            Thread.sleep(200);');
+            lines.push('        } catch (InterruptedException e) {');
+            lines.push('            Thread.currentThread().interrupt();');
+            lines.push('        }');
+            lines.push('        ');
+            lines.push('        // Check if navigation occurred');
+            lines.push('        String urlAfterClick = getDriver().getCurrentUrl();');
+            lines.push('        if (!urlBeforeClick.equals(urlAfterClick)) {');
+            lines.push('            // Navigation occurred - wait for page to load');
+            lines.push('            System.out.println("[Click] Navigation detected after clicking, waiting for page to load...");');
+            lines.push('            // Wait for page to load (check for document.readyState)');
+            lines.push('            org.openqa.selenium.support.ui.WebDriverWait wait = new org.openqa.selenium.support.ui.WebDriverWait(getDriver(), java.time.Duration.ofSeconds(30));');
+            lines.push('            wait.until(webDriver -> ((org.openqa.selenium.JavascriptExecutor) webDriver).executeScript("return document.readyState").equals("complete"));');
+            lines.push('            // Wait for dynamic content to load (pagination, AJAX, etc.)');
+            lines.push('            try {');
+            lines.push('                Thread.sleep(1000);');
+            lines.push('            } catch (InterruptedException e) {');
+            lines.push('                Thread.currentThread().interrupt();');
+            lines.push('            }');
+            lines.push('            System.out.println("[Click] Page loaded after navigation to: " + getDriver().getCurrentUrl());');
+            lines.push('        } else {');
+            lines.push('            // No navigation - just wait a bit for any dynamic updates');
+            lines.push('            try {');
+            lines.push('                Thread.sleep(500);');
+            lines.push('            } catch (InterruptedException e) {');
+            lines.push('                Thread.currentThread().interrupt();');
+            lines.push('            }');
+            lines.push('        }');
+          }
         }
       }
       lines.push('    }');
@@ -1139,14 +1162,38 @@ function generateJavaStepDefinitions(framework, stepDefMap, groupedActions, base
         const elementMethodName = toCamelCase(matchingStep.elementName);
         lines.push(`        ${pageVarName}.type${capitalize(elementMethodName)}(value);`);
       } else {
-        const typeAction = isPlaywrightJava(framework)
-          ? ['getPage().fill(selector, value);']
-          : [
-              'WebElement input = getDriver().findElement(By.cssSelector(selector));',
-              'input.clear();',
-              'input.sendKeys(value);'
-            ];
-        lines.push(...typeAction.map(line => `        ${line}`));
+        if (isPlaywrightJava(framework)) {
+          lines.push('        getPage().fill(selector, value);');
+        } else if (selectorMap.size > 0) {
+          // Selenium with healing: walk the recorded fallback chain on type too.
+          lines.push('        java.util.List<String> selectors = SELECTOR_FALLBACKS_BY_PRIMARY.get(selector);');
+          lines.push('        if (selectors == null || selectors.isEmpty()) {');
+          lines.push('            selectors = new java.util.ArrayList<>();');
+          lines.push('            selectors.add(selector);');
+          lines.push('        }');
+          lines.push('        org.openqa.selenium.support.ui.WebDriverWait wait = new org.openqa.selenium.support.ui.WebDriverWait(getDriver(), java.time.Duration.ofSeconds(15));');
+          lines.push('        WebElement input = null;');
+          lines.push('        for (String candidate : selectors) {');
+          lines.push('            try {');
+          lines.push('                if (candidate.startsWith("//") || candidate.startsWith("(//") || candidate.startsWith("xpath=")) {');
+          lines.push('                    String xp = candidate.startsWith("xpath=") ? candidate.substring(6) : candidate;');
+          lines.push('                    input = wait.until(org.openqa.selenium.support.ui.ExpectedConditions.visibilityOfElementLocated(By.xpath(xp)));');
+          lines.push('                } else {');
+          lines.push('                    input = wait.until(org.openqa.selenium.support.ui.ExpectedConditions.visibilityOfElementLocated(By.cssSelector(candidate)));');
+          lines.push('                }');
+          lines.push('                if (input != null) break;');
+          lines.push('            } catch (Exception ignored) { /* try next candidate */ }');
+          lines.push('        }');
+          lines.push('        if (input == null) {');
+          lines.push('            throw new RuntimeException("[Type] All recorded selectors failed for: " + selector);');
+          lines.push('        }');
+          lines.push('        input.clear();');
+          lines.push('        input.sendKeys(value);');
+        } else {
+          lines.push('        WebElement input = getDriver().findElement(By.cssSelector(selector));');
+          lines.push('        input.clear();');
+          lines.push('        input.sendKeys(value);');
+        }
       }
       lines.push('    }');
       lines.push('');

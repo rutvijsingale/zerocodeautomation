@@ -1,0 +1,17 @@
+# Fixtures - test_case_generator (POST /api/generate-test-cases)
+
+valid_inputs:
+  - id: minimal
+    payload:
+      steps:
+        - { kind: navigate, url: "https://example.com" }
+        - { kind: assertVisible, selector: "h1" }
+      options: {}
+
+invalid_inputs:
+  - id: empty_steps
+    payload: { steps: [], options: {} }
+    expected_status_set: [400, 500]
+  - id: missing_steps
+    payload: { options: {} }
+    expected_status_set: [400, 500]

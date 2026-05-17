@@ -1,0 +1,63 @@
+{
+  "valid_projects": [
+    {
+      "name": "Checkout Smoke",
+      "description": "Critical happy-path checkout flow",
+      "baseUrl": "https://example.com",
+      "framework": "playwright-ts",
+      "browserType": "chromium"
+    },
+    {
+      "name": "Login Regression",
+      "description": "Full login regression sweep",
+      "baseUrl": "https://staging.example.com",
+      "framework": "playwright-java",
+      "browserType": "firefox"
+    },
+    {
+      "name": "Search API",
+      "description": "API-only suite for /search",
+      "baseUrl": "https://api.example.com",
+      "framework": "selenium-java",
+      "browserType": "webkit"
+    }
+  ],
+  "invalid_projects": [
+    { "id": "missing_name", "payload": { "description": "no name field" }, "expected_status": 400 },
+    { "id": "empty_name", "payload": { "name": "" }, "expected_status": 400 },
+    { "id": "whitespace_only_name", "payload": { "name": "     " }, "expected_status": 400 },
+    { "id": "non_string_name", "payload": { "name": 12345 }, "expected_status": 400 }
+  ],
+  "edge_projects": [
+    {
+      "id": "max_length_name",
+      "payload": {
+        "name": "P-Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "description": "name at sanitiser length cap"
+      }
+    },
+    {
+      "id": "unicode_name",
+      "payload": {
+        "name": "プロジェクト-α",
+        "description": "non-ASCII name; sanitiser will strip but request must succeed"
+      }
+    },
+    {
+      "id": "duplicate_name",
+      "payload": {
+        "name": "Duplicate Project",
+        "description": "second create with same name should auto-suffix with timestamp"
+      }
+    }
+  ],
+  "malicious_project_ids": [
+    "../../etc/passwd",
+    "..\\..\\windows\\system32",
+    "; rm -rf /",
+    "<script>alert(1)</script>",
+    "drop table projects;--",
+    "  spaces in id  ",
+    "with/slash"
+  ]
+}

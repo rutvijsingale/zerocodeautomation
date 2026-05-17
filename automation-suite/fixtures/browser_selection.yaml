@@ -1,0 +1,18 @@
+# Fixtures - browser_selection
+
+expected_options:
+  - chromium
+  - firefox
+  - webkit
+
+# These should all be tolerated by /api/recording/start
+allowed_for_recording_start:
+  - chromium
+  - firefox
+  - webkit
+
+# These should be tolerated by /api/export browserType
+allowed_for_export:
+  - chromium
+  - firefox
+  - webkit

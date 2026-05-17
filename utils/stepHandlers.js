@@ -1,21 +1,79 @@
 /**
  * Common Step Handlers - Reusable functionality for recording, code generation, and execution
- * 
+ *
  * This module provides shared utilities for:
  * - Converting steps to code (Playwright, Selenium, Gherkin)
- * - Executing steps during rerun
+ * - Executing steps during rerun (with self-healing locator chain)
  * - Normalizing step descriptions
  * - Validating step data
  */
 
+/* -------------------------------------------------------------------------- *
+ *  Self-healing locator resolver                                             *
+ *                                                                            *
+ *  The actual logic lives in utils/locatorHealer.js so it can be unit-tested *
+ *  without spinning up Playwright. This file just delegates and re-exports   *
+ *  the legacy alias `resolveSelectorWithHealing` for back-compat.            *
+ *                                                                            *
+ *  Contract recap:                                                           *
+ *    - Zero-overhead happy path: no fallbacks AND no element metadata →      *
+ *      primary returned unchanged; underlying Playwright call validates.    *
+ *    - With fallbacks: primary checked permissively, fallbacks checked       *
+ *      strictly (must be unique). Ambiguous candidates are skipped, never    *
+ *      silently chosen.                                                      *
+ *    - Generated Java step defs already walk SELECTOR_FALLBACKS_BY_PRIMARY   *
+ *      at runtime; this gives the live /api/rerun engine the same behaviour. *
+ * -------------------------------------------------------------------------- */
+
+import { findElementWithHealing } from './locatorHealer.js';
+import {
+  resolveCredentialPlaceholders,
+  isCredentialPlaceholder,
+  maskSecret,
+} from './credentialResolver.js';
+
 /**
- * Execute a single step using Playwright
+ * Back-compat alias used by older imports / tests. Prefer
+ * `findElementWithHealing` directly in new code.
+ */
+export async function resolveSelectorWithHealing(page, step, opts = {}) {
+  return findElementWithHealing(page, step, opts);
+}
+
+/**
+ * Internal helper: pull `step.value` and resolve any `${ENV_VAR}` placeholder
+ * to the real environment value at runtime. The resolved string is NEVER
+ * persisted back onto the step (so it doesn't leak into rerun reports).
+ * For logging, callers should use `maskSecret(...)` on the resolved value
+ * when the original was a placeholder.
+ */
+function resolveStepValue(step, fieldName = 'value') {
+  const raw = step[fieldName];
+  const resolved = resolveCredentialPlaceholders(raw, {
+    context: `step.${fieldName}${step.selector ? ` for ${step.selector}` : ''}`,
+  });
+  const wasPlaceholder = isCredentialPlaceholder(raw);
+  return { raw, resolved, wasPlaceholder };
+}
+
+/**
+ * Execute a single step using Playwright.
+ *
+ * Returns an optional metadata object `{ healed, primarySelector, healedVia, attempts }`
+ * when the self-healing locator chain rescued the step. Returns `null` when
+ * the page was closed (legacy contract). Returns `undefined` otherwise.
+ *
  * @param {Object} page - Playwright page object
  * @param {Object} step - Step action to execute
  * @param {Object} context - Optional Playwright context object (needed for checking new tabs)
- * @returns {Promise<void>}
+ * @returns {Promise<({ healed: boolean, primarySelector: string, healedVia: string|null,
+ *   attempts: Array }|null|undefined)>}
  */
 export async function executePlaywrightStep(page, step, context = null) {
+  // Single shared healing handle that interactive cases consume below.
+  // Helpers may overwrite this; the caller in routes/api.js should pull
+  // the final value off the return statement.
+  let healInfo;
   switch (step.kind) {
     case 'navigate':
       // Get URL from multiple possible fields (url, selector, or value)
@@ -94,9 +152,13 @@ export async function executePlaywrightStep(page, step, context = null) {
       // Detect if click causes navigation (pagination, links, etc.)
       const urlBeforeClick = page.url();
       const navigationPromise = page.waitForURL('**', { timeout: 5000 }).catch(() => null);
-      
-      // Perform the click
-      await page.click(step.selector, { timeout: 10000 });
+
+      // Heal first: pick whichever selector in the recorded chain is
+      // currently visible, so the click survives a UI redesign.
+      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
+
+      // Perform the click against the healed (or original) selector.
+      await page.click(healInfo.selector, { timeout: 10000 });
       
       // Wait for potential navigation to start
       await page.waitForTimeout(200);
@@ -133,33 +195,49 @@ export async function executePlaywrightStep(page, step, context = null) {
       break;
 
     case 'doubleClick':
-      await page.dblclick(step.selector, { timeout: 10000 });
+      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
+      await page.dblclick(healInfo.selector, { timeout: 10000 });
       await page.waitForTimeout(300);
       break;
 
-    case 'type':
-      await page.fill(step.selector, '', { timeout: 10000 });
-      await page.fill(step.selector, step.value || '', { timeout: 10000 });
+    case 'type': {
+      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
+      const { resolved: typedValue, wasPlaceholder } = resolveStepValue(step, 'value');
+      await page.fill(healInfo.selector, '', { timeout: 10000 });
+      await page.fill(healInfo.selector, typedValue || '', { timeout: 10000 });
+      // Mask the resolved value in logs when it came from a credential placeholder.
+      const safeForLog = wasPlaceholder ? maskSecret(typedValue) : (typedValue || '');
+      console.log(`[Step:type] ${healInfo.selector} ← ${safeForLog} (${(typedValue || '').length} chars)`);
       await page.waitForTimeout(200);
       break;
+    }
 
-    case 'select':
-      await page.selectOption(step.selector, step.value || step.selectedText || '', { timeout: 10000 });
+    case 'select': {
+      healInfo = await findElementWithHealing(page, step, { state: 'attached' });
+      const rawSel = step.value || step.selectedText || '';
+      const selValue = resolveCredentialPlaceholders(rawSel, {
+        context: `step.value for ${healInfo.selector}`,
+      });
+      await page.selectOption(healInfo.selector, selValue || '', { timeout: 10000 });
       await page.waitForTimeout(300);
       break;
+    }
 
     case 'check':
-      await page.check(step.selector, { timeout: 10000 });
+      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
+      await page.check(healInfo.selector, { timeout: 10000 });
       await page.waitForTimeout(200);
       break;
 
     case 'uncheck':
-      await page.uncheck(step.selector, { timeout: 10000 });
+      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
+      await page.uncheck(healInfo.selector, { timeout: 10000 });
       await page.waitForTimeout(200);
       break;
 
     case 'hover':
-      await page.hover(step.selector, { timeout: 10000 });
+      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
+      await page.hover(healInfo.selector, { timeout: 10000 });
       await page.waitForTimeout(200);
       break;
 
@@ -174,23 +252,62 @@ export async function executePlaywrightStep(page, step, context = null) {
       break;
 
     case 'waitForSelector':
-      await page.waitForSelector(step.selector, { timeout: 10000 });
+      healInfo = await findElementWithHealing(page, step, { state: 'attached' });
+      await page.waitForSelector(healInfo.selector, { timeout: 10000 });
       break;
 
     case 'assertText':
-      const text = await page.textContent(step.selector);
+      healInfo = await findElementWithHealing(page, step, { state: 'attached' });
+      const text = await page.textContent(healInfo.selector);
       const expectedText = step.expectedValue || step.text || '';
       if (!text || !text.includes(expectedText)) {
+        // T3.13 — assertion repair. The element exists but its text
+        // doesn't match. This is the textbook "label changed" scenario:
+        // "Sign in" → "Log in", "Cart (0)" → "Cart". Two-tier rescue:
+        //   (a) Soft compare — strip non-alphanumerics + lowercase. If
+        //       the cores match, accept the new text and tag healed.
+        //   (b) AI suggest — ask the local LLM whether the actual text
+        //       is a semantically equivalent rewording. Only consult
+        //       AI when (a) fails AND a provider is available.
+        const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const expectedCore = norm(expectedText);
+        const actualCore   = norm(text);
+        if (expectedCore && actualCore && actualCore.includes(expectedCore)) {
+          // Soft repair — accept.
+          if (healInfo) healInfo.repaired = { kind: 'assertion-soft', from: expectedText, to: text };
+          break;
+        }
+        try {
+          const { getAiProvider } = await import('../services/aiService.js');
+          const ai = await getAiProvider();
+          if (ai && ai.available && ai.available()) {
+            // Reuse the locator-suggest channel as a generic ask. We
+            // don't have a dedicated assertText prompt yet; phrase it
+            // as a yes/no by passing the expected string as elementHint.
+            const resp = await ai.suggestLocator({
+              failedSelector: 'assertText',
+              elementHint: `Are these texts equivalent in meaning? Expected: "${expectedText}". Actual: "${text}". Reply YES or NO only.`,
+              htmlSnippet: '',
+            }).catch(() => null);
+            const raw = (resp && resp.raw) || '';
+            if (/^\s*yes\b/i.test(raw) || /equivalent|same|match/i.test(raw)) {
+              if (healInfo) healInfo.repaired = { kind: 'assertion-ai', from: expectedText, to: text };
+              break;
+            }
+          }
+        } catch (_aiErr) { /* AI is best-effort — fall through to throw */ }
         throw new Error(`Expected text "${expectedText}" not found. Found: "${text}"`);
       }
       break;
 
     case 'assertVisible':
-      await page.waitForSelector(step.selector, { state: 'visible', timeout: 10000 });
+      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
+      await page.waitForSelector(healInfo.selector, { state: 'visible', timeout: 10000 });
       break;
 
     case 'assertAttribute':
-      const attrValue = await page.getAttribute(step.selector, step.value || 'value');
+      healInfo = await findElementWithHealing(page, step, { state: 'attached' });
+      const attrValue = await page.getAttribute(healInfo.selector, step.value || 'value');
       const expectedAttr = step.expectedValue || '';
       if (attrValue !== expectedAttr) {
         throw new Error(`Expected attribute "${step.value}" to be "${expectedAttr}", got "${attrValue}"`);
@@ -204,10 +321,11 @@ export async function executePlaywrightStep(page, step, context = null) {
     case 'scroll':
       // Scroll can be: scroll to element, scroll to Y position, scroll to top/bottom
       if (step.scroll && step.scroll.mode === 'element') {
-        // Scroll to element using locator candidates
-        const selector = step.selector || (step.scroll.locatorCandidates && step.scroll.locatorCandidates[step.scroll.primaryLocatorIndex || 0]?.selector);
-        if (selector) {
-          await page.locator(selector).scrollIntoViewIfNeeded({ timeout: 10000 });
+        // Scroll to element using locator candidates (with healing fallback)
+        const seedSelector = step.selector || (step.scroll.locatorCandidates && step.scroll.locatorCandidates[step.scroll.primaryLocatorIndex || 0]?.selector);
+        if (seedSelector) {
+          healInfo = await findElementWithHealing(page, { ...step, selector: seedSelector }, { state: 'attached' });
+          await page.locator(healInfo.selector).scrollIntoViewIfNeeded({ timeout: 10000 });
         } else {
           throw new Error('No selector available for scroll to element');
         }
@@ -259,6 +377,20 @@ export async function executePlaywrightStep(page, step, context = null) {
     default:
       throw new Error(`Unknown step kind: ${step.kind}`);
   }
+
+  // Surface healing metadata to the caller (routes/api.js -> rerun result)
+  // so the UI can show "🩹 healed via …" next to the step AND the route can
+  // call saveHealedLocator() to persist the heal mapping to disk.
+  if (healInfo && healInfo.healed) {
+    return {
+      healed: true,
+      primarySelector: healInfo.primarySelector,
+      healedVia: healInfo.healedVia,
+      reason: healInfo.reason || 'healed',
+      attempts: healInfo.attempts,
+    };
+  }
+  return undefined;
 }
 
 /**

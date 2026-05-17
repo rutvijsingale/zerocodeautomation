@@ -1,0 +1,17 @@
+# Fixtures - maven_runner
+
+invalid_executions:
+  - id: missing_command
+    payload: {}
+    expected_status_set: [400]
+  - id: empty_command
+    payload: { command: "" }
+    expected_status_set: [400]
+
+cancel_cases:
+  - id: missing_execution_id
+    payload: {}
+    expected_status_set: [400]
+  - id: unknown_execution_id
+    payload: { executionId: "does-not-exist" }
+    expected_status_set: [404]

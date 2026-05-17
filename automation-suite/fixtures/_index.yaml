@@ -1,0 +1,39 @@
+# Master fixtures index used by tests across modules.
+# Per-module YAMLs in this folder may also exist (and remain canonical for
+# tests that need parametrize-friendly cases). This file holds *shared*
+# building blocks (canonical step lists, sample envs, etc.) so we do not
+# duplicate them across modules.
+
+shared_steps:
+  navigate:
+    kind: navigate
+    url: "https://example.com"
+  click_login:
+    kind: click
+    selector: "#login"
+    elementName: "loginBtn"
+    pageName: "LoginPage"
+  type_username:
+    kind: type
+    selector: "#username"
+    value: "alice"
+    elementName: "usernameInput"
+    pageName: "LoginPage"
+  type_password:
+    kind: type
+    selector: "#password"
+    value: "Secret123!"
+    elementName: "passwordInput"
+    pageName: "LoginPage"
+  assert_welcome:
+    kind: assertText
+    selector: "#welcome"
+    expectedValue: "Welcome, alice"
+    assertionType: contains
+
+canonical_login_flow:
+  - { kind: navigate,   url: "https://example.com" }
+  - { kind: type,       selector: "#username", value: "alice", elementName: "usernameInput", pageName: "LoginPage" }
+  - { kind: type,       selector: "#password", value: "Secret123!", elementName: "passwordInput", pageName: "LoginPage" }
+  - { kind: click,      selector: "#login", elementName: "loginBtn", pageName: "LoginPage" }
+  - { kind: assertText, selector: "#welcome", expectedValue: "Welcome, alice", assertionType: contains }

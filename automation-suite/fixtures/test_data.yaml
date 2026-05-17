@@ -1,0 +1,28 @@
+# Fixtures - test_data sets
+
+valid_sets:
+  - name: "Login users"
+    examples:
+      - { username: "alice", password: "Secret123!" }
+      - { username: "bob",   password: "P4ssw0rd!"  }
+      - { username: "carol", password: "Hunter2!"   }
+  - name: "Search terms"
+    examples:
+      - { query: "playwright", expected_count: "20" }
+      - { query: "selenium",   expected_count: "15" }
+
+invalid_sets:
+  - id: missing_name
+    payload: { examples: [{ a: 1 }] }
+    expected_status_set: [400]
+  - id: missing_examples
+    payload: { name: "X" }
+    expected_status_set: [400]
+  - id: examples_not_array
+    payload: { name: "X", examples: "no" }
+    expected_status_set: [400]
+
+edge_sets:
+  - id: empty_examples_array
+    payload: { name: "Empty", examples: [] }
+    expected_status_set: [200, 400]

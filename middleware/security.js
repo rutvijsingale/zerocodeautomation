@@ -59,8 +59,15 @@ export const strictRateLimiter = createRateLimiter(5 * 60 * 1000, 10); // 10 req
 // General rate limiting
 export const generalRateLimiter = createRateLimiter(15 * 60 * 1000, 100); // 100 requests per 15 minutes
 
-// Lenient rate limiting for polling endpoints (status checks)
-export const pollingRateLimiter = createRateLimiter(60 * 1000, 60); // 60 requests per minute
+// [ZAC-FIX] Lenient rate limiting for polling endpoints. The dashboard
+// has multiple ~4s pollers running in parallel (framework projection,
+// runs history, framework-summary, dashboard/live, etc.) PLUS the Settings
+// iframe and the Recording tab boot calls — easily 30-60 polls/min on
+// a single user. Original 60/min was too tight, often surfaced as
+// "HTTP 429" on /api/frameworks when navigating tabs after smoke testing.
+// Bumped to 600/min (10/sec sustained) which is still cheap for a
+// localhost-only IDE but absorbs the worst-case observed traffic.
+export const pollingRateLimiter = createRateLimiter(60 * 1000, 600);
 
 // Security headers
 export const securityHeaders = helmet({

@@ -184,6 +184,9 @@ export class ProjectService {
         description: projectData.description || '',
         baseUrl: projectData.baseUrl || 'http://localhost:3000',
         framework: projectData.framework || 'playwright-java',
+        // [ZAC-FIX] FIX E — surface stored framework version (defaults to "latest"
+        // so old project files keep loading without a migration).
+        frameworkVersion: projectData.frameworkVersion || 'latest',
         browserType: projectData.browserType || 'chromium',
         features: projectData.features || [],
         scenarios: projectData.scenarios || [],
@@ -193,6 +196,8 @@ export class ProjectService {
         locators: projectData.locators || [],
         testData: projectData.testData || [],
         reusableFlows: projectData.reusableFlows || [],
+        // [ZAC-FIX] FIX A — manual editor edits (Selenium / Feature / Steps panes).
+        manualCode: projectData.manualCode || null,
         metadata: {
           created: projectData.metadata?.created || new Date().toISOString(),
           updated: projectData.metadata?.updated || new Date().toISOString(),

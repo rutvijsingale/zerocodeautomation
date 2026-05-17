@@ -1,0 +1,32 @@
+# Fixtures - step_builder (POST /api/validate)
+# Verifies that recorded step lists produce a Gherkin feature whose
+# Given/When/Then lines all link to generated step definitions.
+
+valid_step_lists:
+  - id: login_flow
+    steps:
+      - { kind: navigate, url: "https://example.com" }
+      - { kind: type, selector: "#username", value: "alice" }
+      - { kind: type, selector: "#password", value: "Secret123!" }
+      - { kind: click, selector: "#login" }
+      - { kind: assertText, selector: "#welcome", expectedValue: "Welcome", assertionType: contains }
+  - id: search_flow
+    steps:
+      - { kind: navigate, url: "https://example.com" }
+      - { kind: type, selector: "#q", value: "playwright" }
+      - { kind: keyPress, selector: "#q", value: "Enter" }
+      - { kind: assertVisible, selector: ".results" }
+
+empty_lists:
+  - id: empty
+    steps: []
+
+malformed_lists:
+  - id: missing_kind
+    steps:
+      - { selector: "#x" }
+  - id: unsupported_kind
+    steps:
+      - { kind: telekinesis, selector: "#x" }
+  - id: not_an_array
+    steps: "I am not an array"

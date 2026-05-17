@@ -1,0 +1,18 @@
+suite: browser_selection
+version: 1
+settings:
+  enabled: true
+  promote_after_heals: 3
+  fail_on_no_strategy: true
+  report_dir: reports/healer
+  attach_to_allure: true
+
+strategy_priority: [testid, id, role, label, text, css, xpath]
+
+locators:
+  - name: browser_type_select
+    primary: { testid: browserType }
+    fallbacks:
+      - { id: browserType }
+      - { role: combobox }
+      - { css: "select#browserType" }

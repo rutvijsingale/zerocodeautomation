@@ -22,6 +22,7 @@ import { FileService } from './services/fileService.js';
 // Import routes
 import apiRoutes from './routes/api.js';
 import requirementsRoutes from './routes/requirements.js';
+import emailRoutes from './routes/email.js';
 import { handleWebSocketConnection, handleActionCapture } from './routes/websocket.js';
 
 // Initialize services
@@ -173,6 +174,7 @@ app.use(express.static('public'));
 // Routes
 app.use('/api', apiRoutes);
 app.use('/api/requirements', requirementsRoutes);
+app.use('/api/email', emailRoutes);
 
 // Log all registered routes for debugging
 console.log('[Server] API routes mounted at /api');
@@ -183,6 +185,21 @@ app.ws('/api/recording/:sessionId', handleWebSocketConnection);
 
 // Static file serving for generated projects
 app.use('/exports', express.static(fileService.baseDir));
+
+// Read-only static serving for the entire generated-projects/ tree.
+// Used by the dashboard to deep-link into rerun reports, screenshots,
+// videos, traces, and replay-result.json. Mounted with `index: false`
+// so we control the directory-listing UX via /api/dashboard/report
+// rather than letting Express auto-render an HTML index.
+app.use('/reports', express.static('generated-projects', {
+  index: false,
+  fallthrough: true,
+  setHeaders: (res, filePath) => {
+    // .json files served as application/json so browsers display them
+    // nicely instead of forcing a download.
+    if (filePath.endsWith('.json')) res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  },
+}));
 
 // Error handling
 app.use(notFoundHandler);

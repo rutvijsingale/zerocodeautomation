@@ -1,0 +1,4 @@
+# Fixtures - lifecycle (sanity / smoke probes)
+
+required_health_fields: ["status"]   # server emits at least this; we tolerate aliases
+optional_health_fields: ["uptime", "version", "timestamp", "success"]

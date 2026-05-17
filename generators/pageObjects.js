@@ -200,20 +200,38 @@ ${methods}
  * @returns {string} FindBy annotation string
  */
 function getFindByAnnotation(locator) {
-  // Escape quotes in locator value
-  const escapedValue = locator.locatorValue.replace(/"/g, '\\"');
-  
+  const raw = locator.locatorValue || '';
+  // Selenium's @FindBy(id = ...) expects the bare id (no leading "#"). The
+  // recorder/inferLocatorType labels things "id" when the selector starts
+  // with "#", so we have to strip the prefix here. Same for [name="x"] and
+  // [data-testid="x"] which the recorder normalises to type "name"/"testId".
+  const stripHashId = (v) => v.replace(/^#/, '');
+  const stripBracket = (v, attr) => {
+    const m = v.match(new RegExp('^\\\[' + attr + '=(?:"|\\\')([^"\\\']+)(?:"|\\\')\\\]$'));
+    return m ? m[1] : v;
+  };
+  const escape = (v) => String(v).replace(/"/g, '\\"');
+
   switch (locator.locatorType) {
     case 'css':
-      return `css = "${escapedValue}"`;
+      return `css = "${escape(raw)}"`;
     case 'xpath':
-      return `xpath = "${escapedValue}"`;
+      return `xpath = "${escape(raw)}"`;
     case 'id':
-      return `id = "${escapedValue}"`;
+      return `id = "${escape(stripHashId(raw))}"`;
     case 'name':
-      return `name = "${escapedValue}"`;
+      return `name = "${escape(stripBracket(raw, 'name'))}"`;
+    case 'testId':
+      // Selenium has no native testId locator; fall back to css with the
+      // raw [data-testid="..."] selector which is the most stable form.
+      return `css = "${escape(raw)}"`;
+    case 'role':
+      return `css = "${escape(raw)}"`;
+    case 'text':
+      // text= is Playwright; for Selenium, fall back to xpath that filters by text
+      return `xpath = "//*[normalize-space(text())='${escape(raw.replace(/^text=/, ''))}']"`;
     default:
-      return `css = "${escapedValue}"`;
+      return `css = "${escape(raw)}"`;
   }
 }
 
@@ -223,23 +241,37 @@ function getFindByAnnotation(locator) {
  * @returns {string} Playwright locator code
  */
 function getPlaywrightLocatorCode(locator) {
+  const raw = locator.locatorValue || '';
+  // Strip prefixes that the inferLocatorType heuristic added but that the
+  // generator wraps again (e.g. "#searchInput" + "#" prefix would become
+  // "##searchInput"). Keep raw strings if the prefix isn't present.
+  const stripHash = (v) => v.replace(/^#/, '');
+  const stripBracket = (v, attr) => {
+    const m = v.match(new RegExp('^\\\[' + attr + '=(?:"|\\\')([^"\\\']+)(?:"|\\\')\\\]$'));
+    return m ? m[1] : v;
+  };
+  const stripTestId = (v) => stripBracket(v, 'data-testid');
+  const stripRole = (v) => v.replace(/^role=/, '');
+  const stripText = (v) => v.replace(/^text=/, '');
+  const escape = (v) => String(v).replace(/'/g, "\\'");
+
   switch (locator.locatorType) {
     case 'css':
-      return `this.page.locator('${locator.locatorValue}')`;
+      return `this.page.locator('${escape(raw)}')`;
     case 'xpath':
-      return `this.page.locator('xpath=${locator.locatorValue}')`;
+      return `this.page.locator('xpath=${escape(raw)}')`;
     case 'id':
-      return `this.page.locator('#${locator.locatorValue}')`;
+      return `this.page.locator('#${escape(stripHash(raw))}')`;
     case 'name':
-      return `this.page.locator('[name="${locator.locatorValue}"]')`;
+      return `this.page.locator('[name="${escape(stripBracket(raw, 'name'))}"]')`;
     case 'testId':
-      return `this.page.getByTestId('${locator.locatorValue}')`;
+      return `this.page.getByTestId('${escape(stripTestId(raw))}')`;
     case 'role':
-      return `this.page.getByRole('${locator.locatorValue}')`;
+      return `this.page.getByRole('${escape(stripRole(raw))}')`;
     case 'text':
-      return `this.page.getByText('${locator.locatorValue}')`;
+      return `this.page.getByText('${escape(stripText(raw))}')`;
     default:
-      return `this.page.locator('${locator.locatorValue}')`;
+      return `this.page.locator('${escape(raw)}')`;
   }
 }
 
@@ -352,15 +384,34 @@ function capitalize(str) {
  */
 export function generateAllPageObjects(pageLocatorsMap, framework, options = {}) {
   const result = {};
-  
+
+  // Accept two input shapes:
+  //   1. { pageName: [ { elementName, locatorType, locatorValue, ... }, ... ] }
+  //   2. { pageName: { elementName: { selector, type } } }   <-- routes/api.js shape
+  // Normalise to (1) so the Selenium / Playwright generators (which both .map
+  // over `locators`) get a real array regardless of how the caller built it.
+  const normaliseLocators = (locators) => {
+    if (Array.isArray(locators)) return locators;
+    if (locators && typeof locators === 'object') {
+      return Object.entries(locators).map(([elementName, value]) => ({
+        elementName,
+        locatorType: value.type || value.locatorType || 'css',
+        locatorValue: value.selector || value.locatorValue || '',
+        fallbackLocators: value.fallbackLocators || [],
+      }));
+    }
+    return [];
+  };
+
   Object.entries(pageLocatorsMap).forEach(([pageName, locators]) => {
+    const normalised = normaliseLocators(locators);
     if (framework === 'selenium-java') {
-      result[pageName] = generateSeleniumPageObject(pageName, locators, options);
+      result[pageName] = generateSeleniumPageObject(pageName, normalised, options);
     } else if (framework === 'playwright-ts') {
-      result[pageName] = generatePlaywrightPageObject(pageName, locators, options);
+      result[pageName] = generatePlaywrightPageObject(pageName, normalised, options);
     }
   });
-  
+
   return result;
 }
 

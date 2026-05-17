@@ -1,0 +1,73 @@
+# ZAC HealerEngine config - project_management module
+# Consumed by utils/healer_engine.py + utils/locator_strategy.py
+# Drives per-locator fallback chains and self-heal report thresholds.
+
+suite: project_management
+version: 1
+
+settings:
+  enabled: true
+  promote_after_heals: 3        # if a locator heals 3+ times in a run, suggest promotion
+  fail_on_no_strategy: true     # missing primary AND no fallback => fail loudly
+  report_dir: reports/healer
+  attach_to_allure: true
+
+# Strategy priority (lower = tried first). Page Objects use these names when
+# building LocatorSpec; this file documents the canonical order.
+strategy_priority:
+  - testid
+  - id
+  - role
+  - label
+  - text
+  - css
+  - xpath
+
+# Per-locator declarative healing for the Project Management page.
+# Tests can read this file to assert that all UI locators referenced have a
+# fallback chain >= 2 strategies.
+locators:
+  - name: project_dropdown
+    primary: { testid: project-dropdown }
+    fallbacks:
+      - { id: project-dropdown }
+      - { role: combobox }
+      - { css: "select#project-dropdown" }
+
+  - name: new_project_btn
+    primary: { testid: new-project-btn }
+    fallbacks:
+      - { id: new-project-btn }
+      - { role: button, name: "New Project (Optional)" }
+      - { text: "New Project" }
+
+  - name: save_project_btn
+    primary: { testid: save-project-btn }
+    fallbacks:
+      - { id: save-project-btn }
+      - { role: button, name: "Save Project" }
+      - { text: "Save Project" }
+
+  - name: delete_project_btn
+    primary: { testid: delete-project-btn }
+    fallbacks:
+      - { id: delete-project-btn }
+      - { role: button, name: "Delete Project" }
+      - { text: "Delete Project" }
+
+  - name: clear_btn
+    primary: { testid: clear-project-btn }
+    fallbacks:
+      - { id: clear-project-btn }
+      - { text: "Clear" }
+
+  - name: project_status
+    primary: { testid: project-status }
+    fallbacks:
+      - { id: project-status }
+
+  - name: header_title
+    primary: { testid: app-title }
+    fallbacks:
+      - { id: app-title }
+      - { role: heading }

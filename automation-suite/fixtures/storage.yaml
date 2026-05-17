@@ -1,0 +1,5 @@
+# Fixtures - storage stats
+
+required_top_keys: ["storage", "sessions"]
+storage_min_keys: ["totalProjects", "totalSize"]
+sessions_min_keys: ["activeSessions"]

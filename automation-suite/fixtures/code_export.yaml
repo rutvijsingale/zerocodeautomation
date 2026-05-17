@@ -1,0 +1,24 @@
+# Fixtures - code_export (POST /api/export)
+# Drives positive matrix across (framework x browserType).
+
+frameworks:
+  - playwright-ts
+  - playwright-java
+  - selenium-java
+
+browsers:
+  - chromium
+  - firefox
+  - webkit
+
+minimal_steps:
+  - { kind: navigate, url: "https://example.com" }
+  - { kind: click, selector: "#login", elementName: "loginBtn", pageName: "LoginPage" }
+
+invalid_payloads:
+  - id: bad_framework
+    payload: { framework: "cobol-mainframe", steps: [] }
+    expected_status_set: [400, 500]
+  - id: missing_steps_in_export
+    payload: { projectName: "no-steps", framework: "playwright-ts" }
+    expected_status_set: [200]   # server accepts an empty step list and still scaffolds

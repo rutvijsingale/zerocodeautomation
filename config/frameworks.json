@@ -1,0 +1,92 @@
+{
+  "$comment": "Single source of truth for frameworks supported by ZAC. Discovered from UI dropdowns (public/index.html#framework, #stepDefsFramework) and backend dispatch (routes/api.js — selenium-java/playwright-java/playwright-typescript branches). DO NOT add a framework here that isn't already wired into the generators; add the generator first, then list it here.",
+  "version": 1,
+  "frameworks": [
+    {
+      "id": "playwright-java",
+      "label": "Playwright + Java + Cucumber",
+      "language": "java",
+      "runner": {
+        "command": "mvn clean test",
+        "cwd": "."
+      },
+      "conventions": {
+        "testDir": "src/test/java",
+        "mainDir": "src/main/java",
+        "resourcesDir": "src/test/resources",
+        "configFiles": ["pom.xml", "src/test/resources/cucumber.properties"]
+      },
+      "uiVisible": true
+    },
+    {
+      "id": "selenium-java",
+      "label": "Selenium WebDriver + Java + Cucumber",
+      "language": "java",
+      "runner": {
+        "command": "mvn clean test",
+        "cwd": "."
+      },
+      "conventions": {
+        "testDir": "src/test/java",
+        "mainDir": "src/main/java",
+        "resourcesDir": "src/test/resources",
+        "configFiles": ["pom.xml", "src/test/resources/cucumber.properties"]
+      },
+      "uiVisible": true
+    },
+    {
+      "id": "playwright-typescript",
+      "aliases": ["playwright-ts", "playwright"],
+      "label": "Playwright + TypeScript + Cucumber",
+      "language": "typescript",
+      "runner": {
+        "command": "npx cucumber-js",
+        "cwd": "."
+      },
+      "conventions": {
+        "testDir": "tests",
+        "stepsDir": "steps",
+        "featuresDir": "features",
+        "pagesDir": "pages",
+        "configFiles": ["package.json", "playwright.config.ts", "cucumber.config.js"]
+      },
+      "uiVisible": false
+    },
+    {
+      "id": "selenium-testng",
+      "label": "Selenium WebDriver + Java + TestNG",
+      "language": "java",
+      "runner": {
+        "command": "mvn clean test",
+        "cwd": "."
+      },
+      "conventions": {
+        "testDir": "src/test/java",
+        "mainDir": "src/main/java",
+        "resourcesDir": "src/test/resources",
+        "configFiles": ["pom.xml", "src/test/resources/testng.xml"]
+      },
+      "uiVisible": true,
+      "$comment": "Pure-TestNG (no Cucumber). For BDD with Selenium use selenium-java. Plugin module: generators/selenium-testng.js. See generators/PLUGIN.md."
+    },
+    {
+      "id": "playwright-javascript",
+      "aliases": ["playwright-js"],
+      "label": "Playwright + JavaScript + Cucumber",
+      "language": "javascript",
+      "runner": {
+        "command": "npx cucumber-js",
+        "cwd": "."
+      },
+      "conventions": {
+        "testDir": "tests",
+        "stepsDir": "steps",
+        "featuresDir": "features",
+        "pagesDir": "pages",
+        "configFiles": ["package.json", "playwright.config.js", "cucumber.config.js"]
+      },
+      "uiVisible": true,
+      "$comment": "T2.2 — Pure-JavaScript variant of playwright-typescript. Same Cucumber + Playwright stack, but plain .js files (no TS toolchain). The /api/projects/:id/generate-files non-Java branch handles language: 'javascript' by stripping types; the existing TS template is reused via that switch."
+    }
+  ]
+}

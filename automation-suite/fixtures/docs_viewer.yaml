@@ -1,0 +1,11 @@
+# Fixtures - docs_viewer
+
+served_docs:
+  - { route: "/USER_MANUAL.md",            min_bytes: 1000, must_contain: ["User Manual", "Zero"] }
+  - { route: "/QUICK_START_GUIDE.md",      min_bytes: 200,  must_contain: ["Quick Start"] }
+  - { route: "/TEST_CASE_DESIGN_GUIDE.md", min_bytes: 200,  must_contain: ["Test Case"] }
+  - { route: "/AUTOMATION_ENGINEER_GUIDE.md", min_bytes: 200, must_contain: ["Automation"] }
+  - { route: "/SCENARIO_OUTLINE_GUIDE.md", min_bytes: 200,  must_contain: ["Scenario"] }
+
+absent_docs:
+  - "/DOES_NOT_EXIST.md"

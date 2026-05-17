@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>ZAC Rerun Report</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!--
+  Pretty viewer for a single rerun report. Loaded with:
+    /report.html?path=<framework>/<project>/reruns/<test>/<timestamp>
+  Pulls /reports/<path>/replay-result.json + screenshot listings.
+  All-local, no CDN, works offline.
+-->
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --border: #2a313d;
+    --text: #e8ecf2;
+    --text-dim: #9aa4b2;
+    --accent: #5aa9ff;
+    --green: #4ade80;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --purple: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    background: linear-gradient(180deg, #161a22, #11141b);
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header .meta { color: var(--text-dim); font-size: 13px; }
+  header a { color: var(--accent); text-decoration: none; margin-left: 16px; }
+  header a:hover { text-decoration: underline; }
+
+  main { padding: 18px 24px; max-width: 1400px; margin: 0 auto; }
+
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .stat .label { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+  .stat.passed .value { color: var(--green); }
+  .stat.failed .value { color: var(--red); }
+  .stat.amber .value  { color: var(--amber); }
+  .stat.accent .value { color: var(--accent); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+  }
+  .panel h2 { margin: 0 0 12px 0; font-size: 14px; font-weight: 600; }
+  .panel h2 .hint { color: var(--text-dim); font-weight: 400; margin-left: 8px; font-size: 12px; }
+
+  .step-row {
+    display: grid;
+    grid-template-columns: 30px 100px 1fr 80px 100px;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    align-items: center;
+  }
+  .step-row:last-child { border-bottom: none; }
+  .step-row .idx { color: var(--text-dim); text-align: right; font-variant-numeric: tabular-nums; }
+  .step-row .kind {
+    font-weight: 600;
+    color: var(--accent);
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  .step-row .desc { color: var(--text-dim); font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
+  .step-row .duration { text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .step-row .status { text-align: right; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .pill.passed { background: rgba(74, 222, 128, 0.15); color: var(--green); }
+  .pill.failed { background: rgba(248, 113, 113, 0.15); color: var(--red); }
+  .pill.heal   { background: rgba(167, 139, 250, 0.15); color: var(--purple); }
+
+  .heal-detail {
+    margin-left: 142px;
+    margin-top: 4px;
+    padding: 6px 10px;
+    background: rgba(167, 139, 250, 0.05);
+    border-left: 2px solid var(--purple);
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .heal-detail .from { color: var(--red); }
+  .heal-detail .to   { color: var(--green); }
+
+  .artifact-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .artifact-grid img,
+  .artifact-grid video {
+    width: 100%;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #000;
+  }
+  .artifact-grid a { display: block; color: var(--text-dim); text-decoration: none; font-size: 11px; margin-top: 4px; word-break: break-all; }
+  .artifact-grid a:hover { color: var(--accent); }
+
+  pre.json {
+    background: #0c0f15;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin: 0;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #d4d4d4;
+    overflow-x: auto;
+    max-height: 400px;
+  }
+
+  .empty { color: var(--text-dim); padding: 24px; text-align: center; font-style: italic; }
+
+  .file-link {
+    display: inline-block;
+    padding: 4px 8px;
+    background: rgba(90, 169, 255, 0.1);
+    border: 1px solid rgba(90, 169, 255, 0.3);
+    color: var(--accent);
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-right: 6px;
+  }
+  .file-link:hover { background: rgba(90, 169, 255, 0.2); }
+
+  /* Download buttons */
+  .dlbtn {
+    background: rgba(90, 169, 255, 0.15);
+    border: 1px solid rgba(90, 169, 255, 0.4);
+    color: var(--accent);
+    text-decoration: none;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .dlbtn:hover { background: rgba(90, 169, 255, 0.25); }
+
+  /*
+    @media print rules so File → Print → Save as PDF gives a clean
+    document. We strip the dark theme and switch to a light one because
+    saving a dark theme to PDF burns ink and is harder to read.
+  */
+  @media print {
+    body { background: white !important; color: #1a1a1a !important; }
+    header, .no-print { display: none !important; }
+    main { padding: 0; max-width: none; }
+    .panel { background: white !important; color: #1a1a1a !important; border: 1px solid #ddd !important; page-break-inside: avoid; }
+    .panel h2, .panel h3 { color: #1a1a1a !important; }
+    .stat { background: #f9fafb !important; color: #1a1a1a !important; border: 1px solid #ddd !important; }
+    .stat .label { color: #6b7280 !important; }
+    .step-row { color: #1a1a1a !important; border-bottom-color: #f3f4f6 !important; }
+    .step-row .desc { color: #4b5563 !important; }
+    pre.json { background: #f9fafb !important; color: #1a1a1a !important; max-height: none; white-space: pre-wrap; }
+    .pill.passed { background: #dcfce7 !important; color: #16a34a !important; }
+    .pill.failed { background: #fee2e2 !important; color: #dc2626 !important; }
+    .pill.heal   { background: #ede9fe !important; color: #7c3aed !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="no-print">
+  <h1 id="reportTitle">Rerun Report</h1>
+  <div class="meta" style="display:flex; align-items:center; gap:8px;">
+    <span id="reportTimestamp"></span>
+    <button id="dlHtmlBtn" class="dlbtn" title="Download a self-contained HTML report">📄 HTML</button>
+    <a id="dlJsonBtn" class="dlbtn" title="Download the raw replay-result.json" download>📊 JSON</a>
+    <button id="dlPdfBtn" class="dlbtn" title="Print this report as PDF (uses your browser's Save as PDF)">🖨 PDF</button>
+    <a href="/dashboard.html">📊 Dashboard</a>
+    <a href="/">← Recorder</a>
+  </div>
+</header>
+
+<main>
+  <div id="error" style="display:none; padding:20px; background:rgba(248,113,113,0.1); border:1px solid var(--red); border-radius:8px; color:var(--red); margin-bottom:16px;"></div>
+
+  <div class="summary">
+    <div class="stat accent"> <div class="label">Status</div>          <div class="value" id="statValStatus">—</div></div>
+    <div class="stat passed"> <div class="label">Steps passed</div>    <div class="value" id="statValPassed">—</div></div>
+    <div class="stat failed"> <div class="label">Steps failed</div>    <div class="value" id="statValFailed">—</div></div>
+    <div class="stat amber">  <div class="label">Healing events</div>  <div class="value" id="statValHeal">—</div></div>
+    <div class="stat accent"> <div class="label">Duration</div>        <div class="value" id="statValDuration">—</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Step-by-step results</h2>
+    <div id="stepListHost"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Artifacts <span class="hint">— click to open in a new tab</span></h2>
+    <div id="artifactLinks" style="margin-bottom:12px;"></div>
+    <h3 style="font-size:12px; color:var(--text-dim); margin:12px 0 8px 0; text-transform:uppercase; letter-spacing:0.5px;">Screenshots</h3>
+    <div id="screenshotsHost" class="artifact-grid"></div>
+    <h3 style="font-size:12px; color:var(--text-dim); margin:12px 0 8px 0; text-transform:uppercase; letter-spacing:0.5px;">Videos</h3>
+    <div id="videosHost" class="artifact-grid"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Raw replay-result.json</h2>
+    <pre class="json" id="rawJson"></pre>
+  </div>
+</main>
+
+<script src="/report.js?v=2026-05-10-csp"></script>
+</body>
+</html>

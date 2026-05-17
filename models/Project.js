@@ -2,6 +2,9 @@
  * Project Domain Model
  * Represents a test automation project containing features, scenarios, and configuration
  */
+import { Feature } from './Feature.js';
+import { Environment } from './Environment.js';
+
 export class Project {
   /**
    * @param {Object} data - Project data

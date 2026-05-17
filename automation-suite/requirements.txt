@@ -1,0 +1,36 @@
+# ZeroAutomationCode - automation-suite/requirements.txt
+# Pinned for reproducible CI runs. Bump deliberately.
+
+# ---- Core test runner ----
+pytest==8.3.3
+pytest-xdist==3.6.1
+pytest-rerunfailures==14.0
+pytest-timeout==2.3.1
+pytest-asyncio==0.24.0
+
+# ---- UI / E2E ----
+playwright==1.47.2
+pytest-playwright==0.5.2
+
+# ---- API + Contract ----
+requests==2.32.3
+jsonschema==4.23.0
+pact-python==2.2.1
+
+# ---- Accessibility ----
+axe-playwright-python==0.1.4
+
+# ---- Reporting ----
+allure-pytest==2.13.5
+
+# ---- Data / fixtures ----
+PyYAML==6.0.2
+faker==30.3.0
+
+# ---- WebSocket client (recording channel) ----
+websocket-client==1.8.0
+
+# ---- Logging / utils ----
+python-json-logger==2.0.7
+tenacity==9.0.0
+python-dotenv==1.0.1

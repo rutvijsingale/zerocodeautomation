@@ -98,6 +98,34 @@ function generatePlaywrightStepCode(step) {
     case 'close':
       lines.push(`  await page.close();`);
       break;
+    case 'selectRadio':
+      // T1.6 — semantic radio click. We use page.check() because it works
+      // for radio inputs in Playwright and matches Selenium's click().
+      lines.push(`  await page.check(${JSON.stringify(step.selector)});`);
+      break;
+    case 'scroll':
+      // T1.12 — element-into-view scroll if a selector is present, else
+      // a window-level scroll to a recorded (x,y) position.
+      if (step.selector) {
+        lines.push(`  await page.locator(${JSON.stringify(step.selector)}).scrollIntoViewIfNeeded();`);
+      } else {
+        const x = Number(step.x) || 0, y = Number(step.y) || 0;
+        lines.push(`  await page.evaluate(({x, y}) => window.scrollTo(x, y), { x: ${x}, y: ${y} });`);
+      }
+      break;
+    case 'dragDrop':
+      // T1.2 — Playwright has dragTo for the common case.
+      lines.push(`  await page.locator(${JSON.stringify(step.sourceSelector || step.selector)}).dragTo(page.locator(${JSON.stringify(step.targetSelector || '')}));`);
+      break;
+    case 'fileUpload':
+      // T1.3 — accept either a single filename or an array of names. We
+      // pass the recorded value through; the test runner is responsible
+      // for resolving fixture paths.
+      const fnames = Array.isArray(step.files)
+        ? step.files.map(f => f.name || f).filter(Boolean)
+        : (step.value ? String(step.value).split(',').map(s => s.trim()) : []);
+      lines.push(`  await page.setInputFiles(${JSON.stringify(step.selector)}, ${JSON.stringify(fnames.length === 1 ? fnames[0] : fnames)});`);
+      break;
     case 'apiCall':
       lines.push(`  const resp = await page.request.${(step.method || 'GET').toLowerCase()}('${step.url}');`);
       if (step.assertResponse) {
@@ -185,6 +213,36 @@ function generateSeleniumStepCode(step) {
     case 'close':
       lines.push(`    driver.close();`);
       break;
+    case 'selectRadio':
+      // T1.6 — semantic radio. Selenium has no separate "selectRadio";
+      // a click is sufficient since radios are mutually exclusive.
+      lines.push(`    WebElement radio = driver.findElement(By.cssSelector(${JSON.stringify(step.selector)}));`);
+      lines.push(`    if (!radio.isSelected()) radio.click();`);
+      break;
+    case 'scroll':
+      // T1.12 — Selenium uses the JS executor for scrolling.
+      if (step.selector) {
+        lines.push(`    WebElement scrollTarget = driver.findElement(By.cssSelector(${JSON.stringify(step.selector)}));`);
+        lines.push(`    ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block: 'center'})", scrollTarget);`);
+      } else {
+        const x = Number(step.x) || 0, y = Number(step.y) || 0;
+        lines.push(`    ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("window.scrollTo(${x}, ${y})");`);
+      }
+      break;
+    case 'dragDrop':
+      // T1.2 — Actions API drag-and-drop.
+      lines.push(`    WebElement dragSource = driver.findElement(By.cssSelector(${JSON.stringify(step.sourceSelector || step.selector)}));`);
+      lines.push(`    WebElement dragTarget = driver.findElement(By.cssSelector(${JSON.stringify(step.targetSelector || '')}));`);
+      lines.push(`    new org.openqa.selenium.interactions.Actions(driver).dragAndDrop(dragSource, dragTarget).perform();`);
+      break;
+    case 'fileUpload':
+      // T1.3 — sendKeys on the file input is the standard Selenium upload.
+      const uploadFile = Array.isArray(step.files) && step.files[0]
+        ? (step.files[0].name || step.files[0])
+        : (step.value || '');
+      lines.push(`    WebElement fileInput = driver.findElement(By.cssSelector(${JSON.stringify(step.selector)}));`);
+      lines.push(`    fileInput.sendKeys(${JSON.stringify(uploadFile)});`);
+      break;
   }
   
   return lines.join('\n');
@@ -254,7 +312,34 @@ function generateGherkinStepLine(step, usePlaceholders = false) {
     case 'keyPress':
       const key = step.key || step.value || 'Enter';
       return usePlaceholders ? `    When I press the "<key>" key` : `    When I press the "${key}" key`;
-    
+
+    case 'selectRadio':
+      const radioVal = step.value || step.selectedText || '';
+      return usePlaceholders
+        ? `    When I select radio "<value>" from "<selector>"`
+        : `    When I select radio "${radioVal}" from "${step.selector}"`;
+
+    case 'scroll':
+      if (step.selector) {
+        return usePlaceholders
+          ? `    When I scroll to "<selector>"`
+          : `    When I scroll to "${step.selector}"`;
+      }
+      return `    When I scroll to position (${Number(step.x) || 0}, ${Number(step.y) || 0})`;
+
+    case 'dragDrop':
+      return usePlaceholders
+        ? `    When I drag "<source>" to "<target>"`
+        : `    When I drag "${step.sourceSelector || step.selector}" to "${step.targetSelector || ''}"`;
+
+    case 'fileUpload':
+      const upName = Array.isArray(step.files) && step.files[0]
+        ? (step.files[0].name || step.files[0])
+        : (step.value || '');
+      return usePlaceholders
+        ? `    When I upload "<file>" to "<selector>"`
+        : `    When I upload "${upName}" to "${step.selector}"`;
+
     default:
       return `    # Unknown step: ${step.kind}`;
   }
@@ -330,6 +415,21 @@ function getStepLabel(step) {
       return `Close browser`;
     case 'keyPress':
       return `Press key "${step.key || step.value || 'Enter'}"`;
+    case 'selectRadio':
+      return `Select radio "${step.value || step.selectedText || ''}" in ${step.normalizedDescription || step.selector || 'group'}`;
+    case 'scroll':
+      return step.selector
+        ? `Scroll to ${step.normalizedDescription || step.selector}`
+        : `Scroll to (${Number(step.x) || 0}, ${Number(step.y) || 0})`;
+    case 'dragDrop':
+      return `Drag ${step.sourceSelector || step.selector || 'source'} → ${step.targetSelector || 'target'}`;
+    case 'fileUpload':
+      const fname = Array.isArray(step.files) && step.files[0] ? (step.files[0].name || step.files[0]) : (step.value || '');
+      return `Upload "${fname}" to ${step.normalizedDescription || step.selector || 'file input'}`;
+    case 'download':
+      return `Download "${step.filename || step.url || 'file'}"`;
+    case 'popup':
+      return `Popup opened: ${step.url || ''}`;
     default:
       return step.normalizedStepText || `${step.kind} action`;
   }

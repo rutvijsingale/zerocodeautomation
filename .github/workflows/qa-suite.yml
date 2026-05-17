@@ -1,0 +1,195 @@
+name: ZAC | QA Suite (all modules)
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Single module to run (leave blank for all)"
+        required: false
+        type: string
+
+env:
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.11"
+  ZAC_UI_BASE_URL: "http://127.0.0.1:3000"
+  ZAC_API_BASE_URL: "http://127.0.0.1:3000/api"
+  ZAC_HEADLESS: "true"
+  ALLURE_RESULTS_DIR: "automation-suite/reports/allure-results"
+
+# ----------------------------------------------------------------------------
+# 1. JS unit tests run first - cheapest, catches model regressions instantly.
+# 2. Python lanes are matrix-fanned over (module x browser) where applicable.
+# 3. k6 perf is its own lane; smoke runs on every PR, full bench is gated.
+# ----------------------------------------------------------------------------
+
+jobs:
+  # ==========================================================================
+  unit-js:
+    name: unit-js (domain models + generators)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: "npm" }
+      - run: npm ci || npm install
+      - name: Run node:test
+        run: |
+          mkdir -p reports/unit-js
+          node --test --test-reporter=tap \
+            automation-suite/unit-js/models.test.mjs \
+            automation-suite/unit-js/scenario_outline.test.mjs \
+            | tee reports/unit-js/tap.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-js-tap
+          path: reports/unit-js/
+
+  # ==========================================================================
+  python-lanes:
+    name: ${{ matrix.module }} | ${{ matrix.lane }} | ${{ matrix.browser }}
+    needs: unit-js
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - project_management
+          - step_builder
+          - code_export
+          - test_runner
+          - locators
+          - reusable_flows
+          - test_data
+          - environments
+          - requirements_parser
+          - test_case_generator
+          - append_steps
+          - maven_runner
+          - npm_runner
+          - storage
+          - recording_session
+          - browser_selection
+          - recording_assertions
+          - docs_viewer
+          - lifecycle
+        lane: [api]
+        browser: [chromium]
+        include:
+          # UI lanes only for modules that have a Page Object
+          - module: project_management
+            lane: ui
+            browser: chromium
+          - module: project_management
+            lane: ui
+            browser: firefox
+          - module: recording_session
+            lane: ui
+            browser: chromium
+          - module: browser_selection
+            lane: ui
+            browser: chromium
+          - module: docs_viewer
+            lane: ui
+            browser: chromium
+          # Accessibility / security / visual lanes (project_management is the canonical one for now)
+          - module: project_management
+            lane: accessibility
+            browser: chromium
+          - module: project_management
+            lane: security
+            browser: chromium
+          - module: project_management
+            lane: visual
+            browser: chromium
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: "npm" }
+
+      - name: Start ZAC server
+        run: |
+          npm ci || npm install
+          (npm start &) > zac.out 2>&1
+          for i in {1..40}; do
+            curl -fsS "$ZAC_UI_BASE_URL" > /dev/null && break || sleep 1
+          done
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}", cache: "pip" }
+
+      - name: Install Python deps
+        working-directory: automation-suite
+        run: |
+          pip install -U pip
+          pip install -r requirements.txt
+          if [[ "${{ matrix.lane }}" == "ui" || "${{ matrix.lane }}" == "accessibility" || "${{ matrix.lane }}" == "visual" ]]; then
+            python -m playwright install --with-deps "${{ matrix.browser }}"
+          fi
+
+      - name: Filter to module + lane
+        id: filter
+        run: |
+          MODULE="${{ matrix.module }}"
+          # Allow workflow_dispatch override
+          if [[ -n "${{ inputs.module }}" ]]; then
+            MODULE="${{ inputs.module }}"
+          fi
+          echo "marker=${MODULE} and ${{ matrix.lane }}" >> "$GITHUB_OUTPUT"
+
+      - name: Run pytest (${{ matrix.lane }})
+        working-directory: automation-suite
+        env:
+          ZAC_BROWSER: ${{ matrix.browser }}
+        run: |
+          pytest -m "${{ steps.filter.outputs.marker }}" \
+            --browser "${{ matrix.browser }}" \
+            --alluredir "${{ env.ALLURE_RESULTS_DIR }}" \
+            --maxfail=1 -ra
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-${{ matrix.module }}-${{ matrix.lane }}-${{ matrix.browser }}
+          path: ${{ env.ALLURE_RESULTS_DIR }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: healer-${{ matrix.module }}-${{ matrix.lane }}-${{ matrix.browser }}
+          path: automation-suite/reports/healer/
+
+  # ==========================================================================
+  perf-smoke:
+    name: k6 perf smoke (project_management)
+    needs: python-lanes
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-perf')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: "npm" }
+      - run: |
+          npm ci || npm install
+          (npm start &) > zac.out 2>&1
+          for i in {1..40}; do
+            curl -fsS "$ZAC_UI_BASE_URL" > /dev/null && break || sleep 1
+          done
+      - uses: grafana/setup-k6-action@v1
+      - run: |
+          mkdir -p reports/perf
+          K6_VUS=5 K6_DURATION=30s k6 run \
+            --summary-export reports/perf/project_management.summary.json \
+            automation-suite/perf/project_management.k6.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: k6-perf
+          path: reports/perf/

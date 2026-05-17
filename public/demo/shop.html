@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ZAC Demo Shop</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-2: #a5d6ff;
+      --success: #3fb950;
+      --danger: #f85149;
+      --warn: #d29922;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px; background: var(--panel); border-bottom: 1px solid var(--border);
+    }
+    header h1 { margin: 0; font-size: 18px; }
+    .badge {
+      font-size: 12px; padding: 4px 10px; border-radius: 999px;
+      background: rgba(88,166,255,.15); color: var(--accent); border: 1px solid rgba(88,166,255,.4);
+    }
+    main { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    .toolbar {
+      display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center;
+    }
+    .toolbar input, .toolbar select, .toolbar button {
+      background: var(--panel); color: var(--text); border: 1px solid var(--border);
+      padding: 8px 12px; border-radius: 6px; font-size: 14px;
+    }
+    .toolbar button { cursor: pointer; }
+    .toolbar button.primary { background: var(--accent); color: #0d1117; border-color: var(--accent); font-weight: 600; }
+    .toolbar button.danger { background: var(--danger); color: white; border-color: var(--danger); }
+    .toolbar button.warn { background: var(--warn); color: #0d1117; border-color: var(--warn); }
+    .grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .card .title { font-weight: 600; font-size: 14px; }
+    .card .price { color: var(--accent-2); font-size: 13px; }
+    .card .desc { color: var(--muted); font-size: 12px; line-height: 1.4; min-height: 32px; }
+    .card .add-btn {
+      background: var(--success); color: #0d1117; border: none; padding: 8px 12px; border-radius: 6px;
+      font-weight: 600; cursor: pointer;
+    }
+    .card .add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .cart {
+      position: sticky; top: 16px; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px; margin-bottom: 16px;
+    }
+    .cart h3 { margin: 0 0 8px; font-size: 14px; }
+    .cart-line { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); padding: 4px 0; }
+    .cart-total { font-weight: 600; color: var(--text); border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: var(--panel); color: var(--text); border: 1px solid var(--border);
+      padding: 10px 16px; border-radius: 8px; font-size: 13px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4); opacity: 0; transition: opacity .25s;
+      pointer-events: none; z-index: 9999;
+    }
+    .toast.show { opacity: 1; }
+    .toast.success { border-color: var(--success); color: var(--success); }
+    .toast.error { border-color: var(--danger); color: var(--danger); }
+    .seed-banner {
+      font-size: 12px; color: var(--muted); margin-bottom: 12px;
+    }
+    .seed-banner code { color: var(--accent-2); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🛒 ZAC Demo Shop</h1>
+    <span class="badge" id="modeBadge" data-testid="mode-badge">stable mode</span>
+  </header>
+
+  <main>
+    <div class="seed-banner">
+      Healer test page. URL params: <code>?shake=1</code> randomises element ids/classes on every render.
+      <code>?seed=&lt;n&gt;</code> picks a deterministic mutation. <code>?delay=&lt;ms&gt;</code> delays the product list.
+    </div>
+
+    <div class="toolbar" role="toolbar">
+      <input id="searchInput" data-testid="search-input" placeholder="Search products" aria-label="Search products"/>
+      <select id="categoryFilter" data-testid="category-filter" aria-label="Filter by category">
+        <option value="">All categories</option>
+        <option value="phone">Phones</option>
+        <option value="laptop">Laptops</option>
+        <option value="audio">Audio</option>
+      </select>
+      <button id="searchBtn" data-testid="search-btn" class="primary">Search</button>
+      <button id="shakeBtn" data-testid="shake-btn" class="warn" title="Randomize ids/classes (simulate UI drift)">🌀 Shake DOM</button>
+      <button id="resetBtn" data-testid="reset-btn">Reset</button>
+    </div>
+
+    <div class="cart" id="cartPanel" data-testid="cart-panel">
+      <h3>Cart (<span id="cartCount" data-testid="cart-count">0</span> items)</h3>
+      <div id="cartLines"></div>
+      <div class="cart-total" id="cartTotal" data-testid="cart-total">Total: $0.00</div>
+    </div>
+
+    <div id="productGrid" class="grid" data-testid="product-grid" role="list"></div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- Script lives in shop.js so it loads under the server's CSP `script-src 'self'`. -->
+  <script src="shop.js"></script>
+  
+</body>
+</html>

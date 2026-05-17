@@ -1,0 +1,10 @@
+# Fixtures - scenario_outline
+# Pure-data examples for the JS unit tests in unit-js/.
+
+testdata_set:
+  parameters: ["username", "password", "expected"]
+  rows:
+    - { username: "alice", password: "Secret123!", expected: "Welcome, alice" }
+    - { username: "bob",   password: "P4ssw0rd!",  expected: "Welcome, bob"   }
+
+empty_set: { parameters: [], rows: [] }

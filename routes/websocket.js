@@ -160,14 +160,46 @@ export const handleActionCapture = async (req, res) => {
 
     browserService.updateSessionActivity(sessionId);
 
-    // Validate allowed action kinds
+    // Validate allowed action kinds.
+    // TIER 1 added: `download` (T1.4) and `popup` (T1.9). Both are emitted
+    // by the Node-side Playwright hooks in browserService.setupPageEventHandlers
+    // — they're not browser-DOM events but they round-trip through the same
+    // /action endpoint when the WebSocket isn't connected, so the allowlist
+    // must include them.
+    // TIER 3: T3.5 (shadowDom) and T3.6 (iframe) actions ride on existing
+    // kinds (`click`, `type`) but carry sidecar metadata. They don't need
+    // new entries here — the kind itself is still allowed.
     const allowedKinds = [
       'click', 'doubleClick', 'type', 'select', 'check', 'uncheck', 'selectRadio',
       'navigate', 'assertText', 'assertVisible', 'assertNotVisible', 'assertAttribute', 'assertCount',
       'assertValue', 'assertEnabled', 'assertDisabled', 'assertChecked', 'assertNotChecked',
       'waitFor', 'waitForSelector', 'screenshot', 'hover',
-      'dragDrop', 'fileUpload', 'keyPress', 'scroll', 'close'
+      'dragDrop', 'fileUpload', 'keyPress', 'scroll', 'close',
+      'download', 'popup',
     ];
+
+    // T2.8 — auto-suggested assertions take a side-channel. They are
+    // NOT real steps — they're proposals the recorder offers for the
+    // user to accept later. We stash them on session.suggestions and
+    // return early so they don't pollute session.actions.
+    if (action.kind === 'assertion-suggested') {
+      if (!Array.isArray(session.suggestions)) session.suggestions = [];
+      // Cap and de-dup adjacent identical suggestions to keep the list
+      // small even on a chatty page.
+      const last = session.suggestions[session.suggestions.length - 1];
+      const sig = `${action.suggestedKind}|${action.selector}|${action.expectedValue || ''}`;
+      const lastSig = last ? `${last.suggestedKind}|${last.selector}|${last.expectedValue || ''}` : '';
+      if (sig !== lastSig) {
+        session.suggestions.push({
+          suggestedKind: action.suggestedKind,
+          selector: action.selector,
+          expectedValue: action.expectedValue,
+          timestamp: action.timestamp || Date.now(),
+        });
+        if (session.suggestions.length > 100) session.suggestions.splice(0, session.suggestions.length - 100);
+      }
+      return res.json({ success: true, suggested: true });
+    }
 
     if (!allowedKinds.includes(action.kind)) {
       return res.json({ success: true, ignored: true });
@@ -175,6 +207,41 @@ export const handleActionCapture = async (req, res) => {
 
     // Normalize action in real-time
     const normalizedAction = { ...action };
+
+    // T2.3 — server-side locator-quality re-rank.
+    // The injected recorder produces `locatorCandidates` (array of
+    // {selector, type, unique, count, ...}) sorted by an in-page
+    // `stabilityScore` heuristic. Apply utils/locatorQuality.js#rankCandidates
+    // here so the saved action carries the production scorer's ranking
+    // (which the dashboard's flakiest-locators panel and the healer chain
+    // both rely on for consistent scoring). The original ordering is
+    // preserved on `originalCandidates` for forensics.
+    if (Array.isArray(action.locatorCandidates) && action.locatorCandidates.length > 0) {
+      try {
+        const { rankCandidates } = await import('../utils/locatorQuality.js');
+        const ranked = rankCandidates(action.locatorCandidates);
+        normalizedAction.locatorCandidates = ranked;
+        normalizedAction.originalCandidates = action.locatorCandidates;
+        // Promote the highest-scoring selector if the recorder's primary
+        // pick scored low. This is the "AI-style" win — the production
+        // scorer knows about dynamic-attribute penalties the in-page
+        // heuristic doesn't.
+        if (ranked[0] && ranked[0].confidence > 0 &&
+            ranked[0].selector !== action.selector &&
+            (typeof ranked[0].confidence === 'number') &&
+            ranked[0].confidence >= 60) {
+          normalizedAction.primaryPromotedFrom = action.selector;
+          normalizedAction.selector = ranked[0].selector;
+          normalizedAction.locatorConfidence = ranked[0].confidence;
+          normalizedAction.locatorStrategy = ranked[0].strategy;
+        } else if (ranked[0]) {
+          normalizedAction.locatorConfidence = ranked[0].confidence;
+          normalizedAction.locatorStrategy = ranked[0].strategy;
+        }
+      } catch (e) {
+        console.warn('[Action Capture] locatorQuality re-rank failed:', e.message);
+      }
+    }
 
     // Normalize page names for navigation
     if (action.kind === 'navigate' && action.url) {

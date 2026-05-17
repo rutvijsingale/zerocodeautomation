@@ -88,6 +88,38 @@ export function generateZeroCodeJson(steps = []) {
 
       case 'keyPress':
         action.key = step.key || step.value || '';
+        // T1.10 — modifier-key chord metadata so replay engines can dispatch
+        // page.keyboard.press('Control+S') correctly.
+        if (Array.isArray(step.modifiers) && step.modifiers.length > 0) {
+          action.modifiers = step.modifiers.slice(0);
+        }
+        if (step.selector) action.selector = step.selector;
+        break;
+
+      case 'dragDrop':
+        // T1.2 — preserve both endpoints. `selector` carries the source for
+        // backwards compatibility with code paths that read `step.selector`.
+        action.selector = step.sourceSelector || step.selector || '';
+        action.sourceSelector = step.sourceSelector || step.selector || '';
+        action.targetSelector = step.targetSelector || '';
+        break;
+
+      case 'fileUpload':
+        // T1.3 — captured file metadata (names + sizes only — no bytes).
+        action.selector = step.selector || step.normalizedSelector || '';
+        action.value = step.value || (Array.isArray(step.files) ? step.files.map(f => f.name).join(', ') : '');
+        if (Array.isArray(step.files)) action.files = step.files.slice(0);
+        break;
+
+      case 'download':
+        // T1.4 — Playwright-side capture, no DOM selector.
+        if (step.filename) action.filename = step.filename;
+        if (step.url) action.url = step.url;
+        break;
+
+      case 'popup':
+        // T1.9 — Playwright-side capture, only the popup URL.
+        if (step.url) action.url = step.url;
         break;
 
       default:

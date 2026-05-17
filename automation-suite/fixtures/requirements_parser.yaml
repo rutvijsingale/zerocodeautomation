@@ -1,0 +1,23 @@
+# Fixtures - requirements_parser
+
+# Generated as a real file via utils.sample_files at runtime.
+# This file declares the expected parser behaviour against the canonical SRS.
+
+expected_min_requirements: 5
+expected_min_scenarios: 5
+expected_summary_keys: ["totalRequirements", "totalTestScenarios", "coverage"]
+
+generate_feature_payloads:
+  valid:
+    featureName: "Auth"
+    tags: ["@smoke"]
+    scenarios:
+      - { id: "REQ-1", title: "User can register",       steps: ["Given I open the app", "When I register", "Then I am logged in"] }
+      - { id: "REQ-5", title: "User can reset password", steps: ["Given I forget my password", "When I request reset", "Then I get an email"] }
+  invalid:
+    - id: empty_scenarios
+      payload: { scenarios: [] }
+      expected_status_set: [400, 500]
+    - id: missing_scenarios
+      payload: {}
+      expected_status_set: [400, 500]

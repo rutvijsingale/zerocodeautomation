@@ -1,0 +1,19 @@
+# Fixtures - locators
+
+valid_locators:
+  - { pageName: LoginPage,  elementName: usernameInput, locatorValue: "#username", locatorType: css }
+  - { pageName: LoginPage,  elementName: passwordInput, locatorValue: "#password", locatorType: css }
+  - { pageName: LoginPage,  elementName: loginBtn,      locatorValue: "Login",     locatorType: text }
+  - { pageName: HomePage,   elementName: welcome,       locatorValue: "//h1[contains(.,'Welcome')]", locatorType: xpath }
+  - { pageName: SearchPage, elementName: searchBox,     locatorValue: "search-q",  locatorType: testId }
+
+invalid_locators:
+  - id: missing_pageName
+    payload: { elementName: x, locatorValue: "#x" }
+    expected_status_set: [400]
+  - id: missing_elementName
+    payload: { pageName: P, locatorValue: "#x" }
+    expected_status_set: [400]
+  - id: missing_locatorValue
+    payload: { pageName: P, elementName: x }
+    expected_status_set: [400]

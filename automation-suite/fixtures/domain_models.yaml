@@ -1,0 +1,35 @@
+# Fixtures - domain_models (consumed by unit-js/)
+# Pure-data shapes for round-tripping each model class.
+
+project_data:
+  name: "Demo"
+  description: "demo project"
+  framework: "playwright-ts"
+  baseUrl: "https://example.com"
+  browserType: "chromium"
+
+step_data:
+  kind: "click"
+  selector: "#login"
+  url: ""
+  value: ""
+  expectedValue: ""
+  pageName: "LoginPage"
+  elementName: "loginBtn"
+
+scenario_data:
+  title: "Login"
+  tags: ["@smoke"]
+  steps: []
+
+feature_data:
+  name: "Auth"
+  title: "Login flow"
+  tags: ["@regression"]
+  scenarios: []
+
+env_data:
+  name: "QA"
+  baseUrl: "https://qa.example.com"
+  browserType: "firefox"
+  headless: true
