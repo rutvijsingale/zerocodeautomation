@@ -120,12 +120,18 @@ function setupWebSocketEventHandlers(ws, session, sessionId) {
 // Action capture handler
 export const handleActionCapture = async (req, res) => {
   try {
-    const { sessionId, ...action } = req.body;
-    
+    // [ZAC-FIX] Read sessionId from the URL param if it's missing in
+    // the body. The route is /api/recording/:sessionId/action, so the
+    // URL param is always present; the in-page bridge happens to also
+    // duplicate it in the body, but a client (or our regression
+    // harness) that follows the URL convention alone shouldn't 400.
+    const { sessionId: bodySid, ...action } = req.body || {};
+    const sessionId = bodySid || (req.params && req.params.sessionId);
+
     console.log(`[Action Capture] ========================================`);
     console.log(`[Action Capture] Received action: ${action.kind} for session: ${sessionId}`);
     console.log(`[Action Capture] Action details:`, JSON.stringify(action, null, 2));
-    
+
     // Debug: Log metadata for normalization
     if (action.textContent || action.ariaLabel || action.placeholder || action.id) {
       console.log(`[Action Capture] Element metadata:`, {
@@ -137,9 +143,9 @@ export const handleActionCapture = async (req, res) => {
         selector: action.selector
       });
     }
-    
+
     if (!sessionId) {
-      console.error('[Action Capture] Missing sessionId in request body');
+      console.error('[Action Capture] Missing sessionId in body AND in :sessionId URL param');
       return res.status(400).json({ error: 'Session ID is required' });
     }
     
