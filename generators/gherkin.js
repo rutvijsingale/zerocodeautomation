@@ -23,6 +23,14 @@ import * as stepMatcher from './step-pattern-matcher.js';
  * @param {Array} options.scenarios - Multiple scenarios (array of {title, tags, steps})
  * @returns {string} Generated Gherkin feature file content
  */
+// [ZAC-FIX] Scenario Outline placeholder logic moved into generateStepLine
+// (matchPlaceholder helper). Without it, every step in an Outline used a
+// hardcoded "<value>" which never matches any Examples column header,
+// so Cucumber would substitute nothing and run every row with the
+// literal "<value>" string. The new logic emits "<col>" only when an
+// Examples column actually contains the step value, otherwise leaves
+// the literal — both cases are valid Gherkin and behave correctly.
+
 export function generateFeatureFile({ 
   featureName, 
   featureTitle, 
@@ -68,7 +76,9 @@ export function generateFeatureFile({
       // Scenario or Scenario Outline
       if (scenario.useScenarioOutline && scenario.examples && scenario.examples.length > 0) {
         lines.push(`  Scenario Outline: ${scenario.title || `Scenario ${index + 1}`}`);
-        const scenarioStepLines = (scenario.steps || []).map(step => generateStepLine(step, true));
+        // [ZAC-FIX] Pass the per-scenario examples so each step's
+        // placeholder picks the right column header.
+        const scenarioStepLines = (scenario.steps || []).map(step => generateStepLine(step, true, scenario.examples));
         lines.push(...scenarioStepLines);
         lines.push('');
         lines.push('    Examples:');
@@ -99,7 +109,8 @@ export function generateFeatureFile({
     // Scenario or Scenario Outline
     if (useScenarioOutline && examples && examples.length > 0) {
       lines.push(`  Scenario Outline: ${featureTitle || 'Recorded Flow'}`);
-      const stepLines = steps.map(step => generateStepLine(step, true)); // true = use placeholders
+      // [ZAC-FIX] Pass the examples so each step picks its own column placeholder.
+      const stepLines = steps.map(step => generateStepLine(step, true, examples));
       lines.push(...stepLines);
       lines.push('');
       lines.push('    Examples:');
@@ -129,13 +140,40 @@ export function generateFeatureFile({
  * @param {boolean} usePlaceholders - Whether to use placeholders for Scenario Outline (<value>)
  * @returns {string} Generated step line
  */
-function generateStepLine(step, usePlaceholders = false) {
+function generateStepLine(step, usePlaceholders = false, examples = []) {
+  // [ZAC-FIX] Pick a column-aware Outline placeholder for this step.
+  //
+  // Behaviour:
+  //   - If step.exampleColumn is set, ALWAYS use it as the placeholder.
+  //   - Otherwise, scan the Examples table; only emit a "<col>"
+  //     placeholder when a column's value actually matches the step's
+  //     value. This means non-parameterised steps keep their literal
+  //     value (correct, since they don't vary across rows).
+  //   - If no match and no explicit column, return null so the caller
+  //     can fall back to the literal value.
+  const matchPlaceholder = (val) => {
+    if (step.exampleColumn) return '<' + step.exampleColumn + '>';
+    if (!Array.isArray(examples) || examples.length === 0 || val == null) return null;
+    for (const row of examples) {
+      if (!row || typeof row !== 'object') continue;
+      for (const [col, v] of Object.entries(row)) {
+        if (v === val || (v != null && String(v) === String(val))) return '<' + col + '>';
+      }
+    }
+    return null;
+  };
+
   // Use liveFeatureStep if available (from websocket.js normalization)
   if (step.liveFeatureStep && step.liveFeatureStep.text) {
     let stepText = step.liveFeatureStep.text;
-    // Replace values with placeholders if using Scenario Outline
+    // Replace values with placeholders if using Scenario Outline AND a
+    // matching Examples column exists. If nothing matches, leave the
+    // literal value (the step is constant across rows).
     if (usePlaceholders && step.value) {
-      stepText = stepText.replace(new RegExp(`"${step.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g'), '"<value>"');
+      const placeholder = matchPlaceholder(step.value);
+      if (placeholder) {
+        stepText = stepText.replace(new RegExp(`"${step.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g'), `"${placeholder}"`);
+      }
     }
     return `    ${stepText}`;
   }
@@ -144,7 +182,8 @@ function generateStepLine(step, usePlaceholders = false) {
   switch(step.kind) {
     case 'navigate': {
       const pageName = step.normalizedPageName || step.url || 'Page';
-      const url = usePlaceholders ? '<url>' : (step.url || pageName);
+      const urlValue = step.url || pageName;
+      const url = usePlaceholders ? (matchPlaceholder(urlValue) || urlValue) : urlValue;
       return `    Given I navigate to "${url}"`;
     }
     case 'click': {
@@ -153,7 +192,8 @@ function generateStepLine(step, usePlaceholders = false) {
     }
     case 'type': {
       const desc = step.normalizedDescription || step.selector || 'Field';
-      const value = usePlaceholders ? '<value>' : (step.value || '');
+      const realVal = step.value || '';
+      const value = usePlaceholders ? (matchPlaceholder(realVal) || realVal) : realVal;
       return `    And I type "${value}" into "${desc}"`;
     }
     case 'doubleClick': {
@@ -162,7 +202,8 @@ function generateStepLine(step, usePlaceholders = false) {
     }
     case 'select': {
       const desc = step.normalizedDescription || step.selector || 'Dropdown';
-      const value = usePlaceholders ? '<value>' : (step.value || step.selectedText || '');
+      const realVal = step.value || step.selectedText || '';
+      const value = usePlaceholders ? (matchPlaceholder(realVal) || realVal) : realVal;
       return `    And I select "${value}" from "${desc}"`;
     }
     case 'check': {
@@ -175,7 +216,8 @@ function generateStepLine(step, usePlaceholders = false) {
     }
     case 'selectRadio': {
       const desc = step.normalizedDescription || step.selector || 'Radio Group';
-      const value = usePlaceholders ? '<value>' : (step.value || '');
+      const realVal = step.value || '';
+      const value = usePlaceholders ? (matchPlaceholder(realVal) || realVal) : realVal;
       return `    And I select radio "${value}" in "${desc}"`;
     }
     case 'hover': {
@@ -189,7 +231,8 @@ function generateStepLine(step, usePlaceholders = false) {
     }
     case 'fileUpload': {
       const desc = step.normalizedDescription || step.selector || 'Field';
-      const filename = usePlaceholders ? '<filename>' : (step.filename || step.filePath || 'file');
+      const realFile = step.filename || step.filePath || 'file';
+      const filename = usePlaceholders ? (matchPlaceholder(realFile) || realFile) : realFile;
       return `    And I upload "${filename}" to "${desc}"`;
     }
     case 'keyPress': {
@@ -206,7 +249,8 @@ function generateStepLine(step, usePlaceholders = false) {
     }
     case 'assertText': {
       const selector = step.selector || step.normalizedDescription || 'element';
-      const expectedText = usePlaceholders ? '<expectedText>' : (step.expectedValue || step.text || '');
+      const realText = step.expectedValue || step.text || '';
+      const expectedText = usePlaceholders ? (matchPlaceholder(realText) || realText) : realText;
       return `    Then I should see "${expectedText}" in "${selector}"`;
     }
     case 'assertVisible': {
@@ -216,7 +260,8 @@ function generateStepLine(step, usePlaceholders = false) {
     case 'assertAttribute': {
       const selector = step.selector || step.normalizedDescription || 'element';
       const attrName = step.value || 'attribute';
-      const expectedValue = usePlaceholders ? '<expectedValue>' : (step.expectedValue || '');
+      const realExp = step.expectedValue || '';
+      const expectedValue = usePlaceholders ? (matchPlaceholder(realExp) || realExp) : realExp;
       const assertionType = step.assertionType || 'equal';
       return `    Then "${selector}" attribute "${attrName}" should ${assertionType} "${expectedValue}"`;
     }
@@ -227,7 +272,8 @@ function generateStepLine(step, usePlaceholders = false) {
     }
     case 'assertValue': {
       const selector = step.selector || step.normalizedDescription || 'element';
-      const expectedValue = usePlaceholders ? '<expectedValue>' : (step.expectedValue || '');
+      const realExp = step.expectedValue || '';
+      const expectedValue = usePlaceholders ? (matchPlaceholder(realExp) || realExp) : realExp;
       const assertionType = step.assertionType || 'equal';
       return `    Then "${selector}" value should ${assertionType} "${expectedValue}"`;
     }

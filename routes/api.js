@@ -794,7 +794,11 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
   // If Scenario Outline is enabled and examples provided, execute for each example
   if (useScenarioOutline && examples && Array.isArray(examples) && examples.length > 0) {
     console.log(`[Rerun] Scenario Outline enabled with ${examples.length} examples`);
-    return await executeScenarioOutline(req, res, steps, browserType, baseUrl, headless, examples, stopOnFailure, projectId);
+    // [ZAC-FIX] Pass framework + testName so the outline branch can also
+    // persist replay-result.json + status.json under the canonical
+    // generated-projects/<fw>/<projectId>/reruns/<test>/<ts>/ layout, so
+    // the dashboard's Framework Projection panel sees data-driven runs.
+    return await executeScenarioOutline(req, res, steps, browserType, baseUrl, headless, examples, stopOnFailure, projectId, rerunFramework, rerunTestName);
   }
 
   // Generate unique execution ID
@@ -1469,7 +1473,7 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
 }));
 
 // Execute Scenario Outline - runs scenario multiple times with different data
-async function executeScenarioOutline(req, res, steps, browserType, baseUrl, headless, examples, stopOnFailure = false, projectId = null) {
+async function executeScenarioOutline(req, res, steps, browserType, baseUrl, headless, examples, stopOnFailure = false, projectId = null, framework = null, testName = null) {
   const executionId = `rerun_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   console.log(`[Rerun] Starting Scenario Outline execution ${executionId} with ${examples.length} examples`);
   
@@ -1477,14 +1481,15 @@ async function executeScenarioOutline(req, res, steps, browserType, baseUrl, hea
   const allResults = [];
   let browser, context, page;
   
-  // Store execution state for cancellation. [ZAC-FIX] include projectId so
-  // the dashboard's Framework Projection panel can correlate scenario-outline
-  // reruns to a project; framework/testName are unknown in this branch.
+  // Store execution state for cancellation. [ZAC-FIX] now also carries the
+  // framework + testName so the persistence block below can drop a
+  // replay-result.json that the dashboard / Framework Projection actually
+  // sees (previously Outline runs were invisible on /api/dashboard/stats).
   const executionState = {
     cancelled: false, browser: null, context: null, page: null,
-    framework: null,
+    framework: framework || null,
     projectId: projectId || null,
-    testName: 'scenario-outline',
+    testName: testName || 'scenario-outline',
     startedAt: new Date().toISOString(),
   };
   runningReruns.set(executionId, executionState);
@@ -1735,6 +1740,79 @@ async function executeScenarioOutline(req, res, steps, browserType, baseUrl, hea
     const totalDuration = Date.now() - startTime;
     const successCount = allResults.filter(r => r.success).length;
     const failureCount = allResults.filter(r => !r.success).length;
+
+    // [ZAC-FIX] Persist Scenario Outline results to disk so dashboards
+    // and report viewers see them. Mirrors the non-outline branch
+    // (uses validateLayoutInputs + ensureRerunScaffold).
+    let rerunLayout = null;
+    if (projectId && framework && testName) {
+      try {
+        const fsp = await import('fs/promises');
+        const layout = await import('../services/projectLayout.js');
+        const validation = await layout.validateLayoutInputs({ framework, projectName: projectId });
+        if (validation.ok) {
+          const scaffold = await layout.ensureRerunScaffold({
+            framework: validation.framework,
+            projectName: validation.projectName,
+            testName,
+          });
+          const stepRows = [];
+          for (const er of allResults) {
+            (er.steps || []).forEach((s) => stepRows.push({
+              step: s.step, success: s.success !== false,
+              duration: s.duration, error: s.error,
+              healing: s.healing, rescuedBy: s.rescuedBy,
+            }));
+          }
+          const replayPayload = {
+            executionId, projectId, framework, testName,
+            scenarioOutline: true,
+            totalExamples: examples.length,
+            executedExamples: allResults.length,
+            success: failureCount === 0 && !executionState.cancelled,
+            cancelled: executionState.cancelled,
+            executedSteps: stepRows.length,
+            successCount: stepRows.filter(s => s.success).length,
+            failureCount: stepRows.filter(s => !s.success).length,
+            durationMs: totalDuration,
+            startedAt: new Date(startTime).toISOString(),
+            completedAt: new Date().toISOString(),
+            results: stepRows,
+            exampleResults: allResults,
+            healingSummary: {
+              healingEvents:  stepRows.filter(s => s.healing).length,
+              healedSteps:    stepRows.filter(s => s.healing && s.healing.healed).length,
+              exhausted:      stepRows.filter(s => s.healing && s.healing.exhausted).length,
+              aiRescues:      stepRows.filter(s => s.rescuedBy === 'ai').length,
+              healerRescues:  stepRows.filter(s => s.rescuedBy === 'healer').length,
+            },
+            scrollSummary: { scrollSteps: 0, successfulScrolls: 0 },
+          };
+          await fsp.writeFile(scaffold.replayResult, JSON.stringify(replayPayload, null, 2), 'utf8');
+          await fsp.writeFile(path.join(scaffold.report, 'status.json'),
+            JSON.stringify({ ...replayPayload, scenarioOutline: true }, null, 2), 'utf8');
+          rerunLayout = {
+            framework: scaffold.project.framework,
+            projectName: scaffold.project.projectName,
+            testName: scaffold.testName,
+            timestamp: scaffold.timestamp,
+            rerunDir: scaffold.rerunDir,
+            report: scaffold.report,
+            replayResult: scaffold.replayResult,
+          };
+          console.log(`[Rerun] Persisted Scenario Outline rerun (status.json + replay-result.json) to ${scaffold.rerunDir}`);
+          try {
+            const { markRerunCompleted } = await import('../services/dashboardService.js');
+            markRerunCompleted({
+              executionId, framework, projectId, testName,
+              success: failureCount === 0 && !executionState.cancelled,
+            });
+          } catch (_) { /* best effort */ }
+        }
+      } catch (e) {
+        console.warn('[Rerun] Outline persistence failed (non-fatal):', e.message);
+      }
+    }
     
     res.json({
       success: failureCount === 0 && !executionState.cancelled,
@@ -1746,7 +1824,8 @@ async function executeScenarioOutline(req, res, steps, browserType, baseUrl, hea
       successCount: successCount,
       failureCount: failureCount,
       duration: `${(totalDuration / 1000).toFixed(2)}s`,
-      results: allResults
+      results: allResults,
+      rerunLayout,
     });
     
   } catch (error) {
