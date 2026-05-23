@@ -5587,7 +5587,19 @@ router.get('/dashboard/report/pdf', generalRateLimiter, asyncHandler(async (req,
 //   • body = { projectId, preserve: true }  → clear EVERYTHING EXCEPT that project
 //   • body = { confirm: true } MUST be present — guard against accidents
 router.post('/dashboard/clear', strictRateLimiter, asyncHandler(async (req, res) => {
-  const { framework = null, projectId = null, preserve = false, confirm = false } = req.body || {};
+  const {
+    framework = null,
+    projectId = null,
+    preserve = false,
+    confirm = false,
+    // [ZAC-FIX 2026-05-24] New scoping options requested by QA:
+    //   testName        — limit to one test name within a project's reruns/
+    //   timestamp       — limit to ONE specific rerun (the YYYY...Z dir)
+    //   olderThanDays   — only remove rerun timestamps older than N days
+    testName = null,
+    timestamp = null,
+    olderThanDays = null,
+  } = req.body || {};
   if (!confirm) {
     return res.status(400).json({
       success: false,
@@ -5597,6 +5609,11 @@ router.post('/dashboard/clear', strictRateLimiter, asyncHandler(async (req, res)
   const fsp = await import('fs/promises');
   const pathLib = await import('path');
   const GENERATED_ROOT = pathLib.resolve('generated-projects');
+  // Compute the cutoff once. Reruns whose mtime is *older* than the
+  // cutoff get deleted; everything newer is preserved.
+  const cutoffMs = (typeof olderThanDays === 'number' && olderThanDays > 0)
+    ? Date.now() - olderThanDays * 24 * 60 * 60 * 1000
+    : null;
 
   const removed = [];
   const skipped = [];
@@ -5639,18 +5656,49 @@ router.post('/dashboard/clear', strictRateLimiter, asyncHandler(async (req, res)
           skipped.push({ framework: fwName, project: pjName, reason: 'no-reruns-dir' });
           continue;
         }
-        // Count what we're about to remove for the response payload.
+        // [ZAC-FIX 2026-05-24] Granular delete: when testName / timestamp /
+        // olderThanDays is set, walk the rerun tree and delete only the
+        // matching timestamp directories instead of nuking the whole
+        // reruns/ subtree.
+        const isGranular = (testName || timestamp || cutoffMs !== null);
         let rerunCount = 0;
-        const tests = await fsp.readdir(rerunsDir, { withFileTypes: true }).catch(() => []);
-        for (const t of tests) {
-          if (!t.isDirectory()) continue;
-          const tsDirs = await fsp.readdir(pathLib.join(rerunsDir, t.name), { withFileTypes: true }).catch(() => []);
-          rerunCount += tsDirs.filter((d) => d.isDirectory()).length;
+        if (isGranular) {
+          const tests = await fsp.readdir(rerunsDir, { withFileTypes: true }).catch(() => []);
+          for (const t of tests) {
+            if (!t.isDirectory()) continue;
+            if (testName && t.name !== testName) continue;
+            const testDir = pathLib.join(rerunsDir, t.name);
+            const tsDirs = await fsp.readdir(testDir, { withFileTypes: true }).catch(() => []);
+            for (const tsEnt of tsDirs) {
+              if (!tsEnt.isDirectory()) continue;
+              if (timestamp && tsEnt.name !== timestamp) continue;
+              const tsPath = pathLib.join(testDir, tsEnt.name);
+              if (cutoffMs !== null) {
+                const tsStat = await fsp.stat(tsPath).catch(() => null);
+                if (!tsStat || tsStat.mtimeMs >= cutoffMs) continue; // newer → preserve
+              }
+              await fsp.rm(tsPath, { recursive: true, force: true });
+              rerunCount++;
+            }
+          }
+          if (rerunCount > 0) {
+            removed.push({ framework: fwName, project: pjName, rerunsRemoved: rerunCount,
+              filter: { testName, timestamp, olderThanDays } });
+          } else {
+            skipped.push({ framework: fwName, project: pjName, reason: 'no-matching-runs' });
+          }
+        } else {
+          // Bulk path: count + nuke + recreate empty dir for project scaffold.
+          const tests = await fsp.readdir(rerunsDir, { withFileTypes: true }).catch(() => []);
+          for (const t of tests) {
+            if (!t.isDirectory()) continue;
+            const tsDirs = await fsp.readdir(pathLib.join(rerunsDir, t.name), { withFileTypes: true }).catch(() => []);
+            rerunCount += tsDirs.filter((d) => d.isDirectory()).length;
+          }
+          await fsp.rm(rerunsDir, { recursive: true, force: true });
+          await fsp.mkdir(rerunsDir, { recursive: true }).catch(() => {});
+          removed.push({ framework: fwName, project: pjName, rerunsRemoved: rerunCount });
         }
-        await fsp.rm(rerunsDir, { recursive: true, force: true });
-        // Re-create the empty reruns dir so the project scaffold stays valid.
-        await fsp.mkdir(rerunsDir, { recursive: true }).catch(() => {});
-        removed.push({ framework: fwName, project: pjName, rerunsRemoved: rerunCount });
       } catch (e) {
         skipped.push({ framework: fwName, project: pjName, reason: 'error: ' + e.message });
       }

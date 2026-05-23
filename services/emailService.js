@@ -208,12 +208,31 @@ export async function testConnection() {
  * @param {Array<{filename, content}|{filename, path}>} [mail.attachments]
  * @returns {Promise<{ ok:boolean, messageId?:string, error?:string, accepted?:Array, rejected?:Array }>}
  */
+// [ZAC-FIX 2026-05-24] Normalise a recipient string or array into a clean,
+// comma-separated list. Accepts "a@b, c@d" or "a@b; c@d" or ["a@b","c@d"]
+// and produces "a@b, c@d" with duplicates removed and whitespace trimmed.
+// Empty / undefined → empty string (nodemailer treats "" same as missing).
+function normaliseRecipients(input) {
+  if (!input) return '';
+  const arr = Array.isArray(input) ? input : String(input).split(/[,;]/);
+  const cleaned = arr
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .filter((v, i, a) => a.indexOf(v) === i);  // dedupe
+  return cleaned.join(', ');
+}
+
 export async function sendMail(mail) {
   const cfg = await readConfigInternal();
   if (!cfg.enabled) {
     return { ok: false, error: 'Email is disabled. Enable it in Settings → Email.' };
   }
-  const to = (mail.to && mail.to.trim()) || cfg.to;
+  // Multi-recipient support: any of `to`, `cc`, `bcc` may be a comma- or
+  // semicolon-separated string OR an array of addresses. Empty fields
+  // fall back to the configured default `to`.
+  const to  = normaliseRecipients(mail.to)  || normaliseRecipients(cfg.to);
+  const cc  = normaliseRecipients(mail.cc);
+  const bcc = normaliseRecipients(mail.bcc);
   const from = (mail.from && mail.from.trim()) || cfg.from || cfg.user;
   if (!to)   return { ok: false, error: 'No recipient. Set a default in Settings or pass `to`.' };
   if (!from) return { ok: false, error: 'No sender. Set "From" in Settings or pass `from`.' };
@@ -221,19 +240,24 @@ export async function sendMail(mail) {
     const t = await buildTransport();
     const info = await t.sendMail({
       from, to,
-      cc: mail.cc, bcc: mail.bcc,
+      cc: cc || undefined,
+      bcc: bcc || undefined,
       subject: mail.subject || '(no subject)',
       text: mail.text,
       html: mail.html,
       attachments: mail.attachments || [],
     });
-    console.log(`${TAG} sent "${mail.subject}" → ${to} (msgId=${info.messageId})`);
-    return { ok: true, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected };
+    const recipientCount = to.split(',').length + (cc ? cc.split(',').length : 0) + (bcc ? bcc.split(',').length : 0);
+    console.log(`${TAG} sent "${mail.subject}" → ${recipientCount} recipient(s) [to=${to}${cc ? `, cc=${cc}` : ''}${bcc ? `, bcc=${bcc}` : ''}] (msgId=${info.messageId})`);
+    return { ok: true, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected, recipientCount };
   } catch (e) {
     console.warn(`${TAG} send failed: ${e.message}`);
     return { ok: false, error: e.message };
   }
 }
+
+// Exported for tests + other modules.
+export const __test__ = { normaliseRecipients };
 
 /* -------------------------------------------------------------------------- *
  *  Convenience builders                                                      *
