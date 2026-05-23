@@ -312,6 +312,11 @@ function testClassJava({ className, baseUrl, steps }) {
   lines.push('import org.openqa.selenium.WebElement;');
   lines.push('import org.openqa.selenium.chrome.ChromeDriver;');
   lines.push('import org.openqa.selenium.chrome.ChromeOptions;');
+  lines.push('import org.openqa.selenium.firefox.FirefoxDriver;');
+  lines.push('import org.openqa.selenium.firefox.FirefoxOptions;');
+  lines.push('import org.openqa.selenium.remote.RemoteWebDriver;');
+  lines.push('import org.openqa.selenium.safari.SafariDriver;');
+  lines.push('import org.openqa.selenium.safari.SafariOptions;');
   lines.push('import org.testng.Assert;');
   lines.push('import org.testng.annotations.AfterMethod;');
   lines.push('import org.testng.annotations.BeforeMethod;');
@@ -319,18 +324,55 @@ function testClassJava({ className, baseUrl, steps }) {
   lines.push('import support.BasePage;');
   lines.push('import support.CredentialsHelper;');
   lines.push('import support.Locators;');
+  lines.push('import java.net.URL;');
   lines.push('');
+  // [ZAC-FIX 2026-05-24] Selenium Grid + browser-type override hooks
+  // for the TestNG path (parity with the Cucumber selenium-java World).
+  // Same env / JVM-prop precedence so QA can flip between local and a
+  // hub without recompiling.
   lines.push(`public class ${className}Test {`);
   lines.push('  private WebDriver driver;');
   lines.push('  private BasePage page;');
   lines.push('');
+  lines.push('  /** Pick browser via ZAC_BROWSER env or zac.browser system property; default chrome. */');
+  lines.push('  private static String resolveBrowserType() {');
+  lines.push('    String env = System.getenv("ZAC_BROWSER");      if (env  != null && !env.isEmpty())  return env;');
+  lines.push('    String prop= System.getProperty("zac.browser"); if (prop != null && !prop.isEmpty()) return prop;');
+  lines.push('    return "chrome";');
+  lines.push('  }');
+  lines.push('  /** Hub URL via SELENIUM_HUB_URL env or zac.seleniumHubUrl property; null = local. */');
+  lines.push('  private static String resolveHubUrl() {');
+  lines.push('    String env = System.getenv("SELENIUM_HUB_URL");        if (env  != null && !env.isEmpty())  return env;');
+  lines.push('    String prop= System.getProperty("zac.seleniumHubUrl"); if (prop != null && !prop.isEmpty()) return prop;');
+  lines.push('    return null;');
+  lines.push('  }');
+  lines.push('');
   lines.push('  @BeforeMethod');
-  lines.push('  public void setUp() {');
-  lines.push('    WebDriverManager.chromedriver().setup();');
-  lines.push('    ChromeOptions opts = new ChromeOptions();');
-  // Always start maximized — matches the recorder + rerun contract.
-  lines.push('    opts.addArguments("--start-maximized");');
-  lines.push('    driver = new ChromeDriver(opts);');
+  lines.push('  public void setUp() throws Exception {');
+  lines.push('    String browserType = resolveBrowserType();');
+  lines.push('    String hubUrl      = resolveHubUrl();');
+  lines.push('    ChromeOptions chromeOpts   = new ChromeOptions();');
+  lines.push('    chromeOpts.addArguments("--start-maximized");');
+  lines.push('    chromeOpts.addArguments("--disable-blink-features=AutomationControlled");');
+  lines.push('    FirefoxOptions firefoxOpts = new FirefoxOptions();');
+  lines.push('    SafariOptions  safariOpts  = new SafariOptions();');
+  lines.push('    if (hubUrl != null) {');
+  lines.push('      // ── Selenium Grid path ──');
+  lines.push('      System.out.println("[TestNG] Using Grid: " + hubUrl + " (browser=" + browserType + ")");');
+  lines.push('      switch (browserType.toLowerCase()) {');
+  lines.push('        case "firefox": driver = new RemoteWebDriver(new URL(hubUrl), firefoxOpts); break;');
+  lines.push('        case "safari":  driver = new RemoteWebDriver(new URL(hubUrl), safariOpts);  break;');
+  lines.push('        default:        driver = new RemoteWebDriver(new URL(hubUrl), chromeOpts);  break;');
+  lines.push('      }');
+  lines.push('    } else {');
+  lines.push('      // ── Local driver path (WebDriverManager auto-resolves binaries) ──');
+  lines.push('      switch (browserType.toLowerCase()) {');
+  lines.push('        case "firefox": WebDriverManager.firefoxdriver().setup(); driver = new FirefoxDriver(firefoxOpts); break;');
+  lines.push('        case "safari":  driver = new SafariDriver(safariOpts); break;');
+  lines.push('        default:        WebDriverManager.chromedriver().setup(); driver = new ChromeDriver(chromeOpts); break;');
+  lines.push('      }');
+  lines.push('    }');
+  lines.push('    try { driver.manage().window().maximize(); } catch (Exception ignored) { /* not all grid nodes support */ }');
   lines.push('    page = new BasePage(driver);');
   lines.push('  }');
   lines.push('');

@@ -97,10 +97,26 @@ import io.cucumber.java.After;
 import io.cucumber.java.Before;
 import java.util.Arrays;
 
+/**
+ * PlaywrightWorld - shared Playwright lifecycle for all step definitions.
+ *
+ * Remote-browser support (added 2026-05-24):
+ *   Set PLAYWRIGHT_WS_ENDPOINT (or zac.playwrightWsEndpoint JVM property)
+ *   to a Playwright Server / BrowserStack / Sauce Labs websocket
+ *   endpoint, e.g. ws://playwright.qa.bank:3001/ . The World will then
+ *   call BrowserType#connect(wsEndpoint) instead of launch(), so the
+ *   same generated JAR runs on a developer laptop AND on a remote
+ *   Playwright cluster without recompile.
+ *
+ * Browser-type override:
+ *   ZAC_BROWSER env var or zac.browser JVM prop wins over the
+ *   compiled-in default.
+ */
 public class PlaywrightWorld {
     private static Browser browser;
     private static BrowserContext context;
     private static Page page;
+    private static Playwright playwright;
 
     public static Browser getBrowser() {
         return browser;
@@ -114,37 +130,58 @@ public class PlaywrightWorld {
         return page;
     }
 
+    private static String resolveBrowserType() {
+        String env  = System.getenv("ZAC_BROWSER");      if (env  != null && !env.isEmpty())  return env;
+        String prop = System.getProperty("zac.browser"); if (prop != null && !prop.isEmpty()) return prop;
+        return "${browserType}";
+    }
+
+    private static String resolveWsEndpoint() {
+        String env  = System.getenv("PLAYWRIGHT_WS_ENDPOINT");        if (env  != null && !env.isEmpty())  return env;
+        String prop = System.getProperty("zac.playwrightWsEndpoint"); if (prop != null && !prop.isEmpty()) return prop;
+        return null;
+    }
+
     @Before
     public void init() {
-        Playwright playwright = Playwright.create();
+        playwright = Playwright.create();
+        String browserType = resolveBrowserType();
+        String wsEndpoint  = resolveWsEndpoint();
+
         BrowserType.LaunchOptions launchOptions = new BrowserType.LaunchOptions()
             .setHeadless(${headless});
 
-        // Launch browser based on type
-        switch ("${browserType}") {
+        BrowserType bt;
+        switch (browserType) {
             case "firefox":
+                bt = playwright.firefox();
                 ${args.length > 0 ? `launchOptions.setArgs(Arrays.asList(${args.map(arg => `"${arg}"`).join(', ')}));` : ''}
-                browser = playwright.firefox().launch(launchOptions);
                 break;
             case "webkit":
+                bt = playwright.webkit();
                 ${args.length > 0 ? `launchOptions.setArgs(Arrays.asList(${args.map(arg => `"${arg}"`).join(', ')}));` : ''}
-                browser = playwright.webkit().launch(launchOptions);
                 break;
             case "edge":
-                // Edge uses Chromium engine with msedge channel
+                bt = playwright.chromium();
                 launchOptions.setChannel("msedge");
                 java.util.List<String> edgeArgs = new java.util.ArrayList<>(${args.length > 0 ? `Arrays.asList(${args.map(arg => `"${arg}"`).join(', ')})` : 'Arrays.asList()'});
                 edgeArgs.add("--brand=Microsoft Edge");
                 launchOptions.setArgs(edgeArgs);
-                browser = playwright.chromium().launch(launchOptions);
                 break;
-            case "chromium":
-            default:
-                // Chrome uses chromium with chrome channel
+            default: // chromium / chrome
+                bt = playwright.chromium();
                 launchOptions.setChannel("chrome");
                 ${args.length > 0 ? `launchOptions.setArgs(Arrays.asList(${args.map(arg => `"${arg}"`).join(', ')}));` : ''}
-                browser = playwright.chromium().launch(launchOptions);
                 break;
+        }
+
+        if (wsEndpoint != null) {
+            // ── Remote Playwright cluster path ──
+            System.out.println("[PlaywrightWorld] Using remote browser at: " + wsEndpoint + " (browser=" + browserType + ")");
+            browser = bt.connect(wsEndpoint);
+        } else {
+            // ── Local launch path ──
+            browser = bt.launch(launchOptions);
         }
 
         // Enable video recording and screenshots for better reporting
@@ -176,6 +213,13 @@ public class PlaywrightWorld {
         }
         if (browser != null) {
             browser.close();
+        }
+        // [ZAC-FIX] Close Playwright last — was leaking the driver
+        // process across scenarios and breaking remote endpoints that
+        // enforce per-session cleanup (BrowserStack / SauceLabs).
+        if (playwright != null) {
+            try { playwright.close(); } catch (Exception ignored) { /* best-effort */ }
+            playwright = null;
         }
     }
 }`;

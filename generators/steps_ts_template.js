@@ -498,12 +498,40 @@ And('I close the browser', async function(this: PlaywrightWorld) {
 }
 
 /**
- * Generate Playwright World file for Cucumber
+ * Generate Playwright World file for Cucumber.
+ *
+ * [ZAC-FIX 2026-05-24] The generated World now respects two env vars
+ * so the same generated suite runs on a developer laptop AND on a
+ * remote Playwright cluster (BrowserStack, Sauce Labs, self-hosted
+ * Playwright Server) without recompile:
+ *
+ *   ZAC_BROWSER             chromium | firefox | webkit | edge
+ *   PLAYWRIGHT_WS_ENDPOINT  ws://playwright.qa.bank:3001/   (optional;
+ *                           when set, world calls
+ *                           browserType.connect(endpoint) instead of
+ *                           browserType.launch(...))
+ *   ZAC_HEADLESS            true | false (default false)
+ *
+ * The TS-stripping pass in routes/api.js (#tsToJs) handles JS lanes,
+ * so this single template feeds both `playwright-typescript` and
+ * `playwright-javascript`.
+ *
  * @returns {string} Generated World class code
  */
 export function generateWorldFile() {
   return `import { setWorldConstructor, World } from '@cucumber/cucumber';
-import { chromium, Browser, BrowserContext, Page } from '@playwright/test';
+import { chromium, firefox, webkit, Browser, BrowserContext, Page } from '@playwright/test';
+
+function resolveBrowserType() {
+  const t = (process.env.ZAC_BROWSER || 'chromium').toLowerCase();
+  if (t === 'firefox') return firefox;
+  if (t === 'webkit' || t === 'safari') return webkit;
+  return chromium; // covers chromium, chrome, edge
+}
+
+function resolveWsEndpoint() {
+  return process.env.PLAYWRIGHT_WS_ENDPOINT || '';
+}
 
 export class PlaywrightWorld extends World {
   browser!: Browser;
@@ -511,7 +539,24 @@ export class PlaywrightWorld extends World {
   page!: Page;
 
   async init() {
-    this.browser = await chromium.launch({ headless: false });
+    const bt = resolveBrowserType();
+    const wsEndpoint = resolveWsEndpoint();
+    const headless = (process.env.ZAC_HEADLESS || 'false').toLowerCase() === 'true';
+
+    if (wsEndpoint) {
+      // ── Remote cluster path ──
+      console.log('[PlaywrightWorld] connecting to', wsEndpoint);
+      this.browser = await bt.connect(wsEndpoint);
+    } else {
+      // ── Local launch path ──
+      const launchArgs = [];
+      if ((process.env.ZAC_BROWSER || '').toLowerCase() === 'edge') {
+        // Edge uses Chromium engine via msedge channel.
+        this.browser = await chromium.launch({ headless, channel: 'msedge', args: launchArgs });
+      } else {
+        this.browser = await bt.launch({ headless, args: launchArgs });
+      }
+    }
     this.context = await this.browser.newContext();
     this.page = await this.context.newPage();
   }

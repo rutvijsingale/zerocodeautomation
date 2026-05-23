@@ -4192,6 +4192,20 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
         out = out.replace(/\s+as\s+[A-Z][A-Za-z_$0-9]*(?:<[^<>]*>)?/g, '');
         // 7. Convert ".ts" import suffixes to ".js".
         out = out.replace(/(from\s+['"])([^'"]+)\.ts(['"])/g, '$1$2.js$3');
+        // 8. [ZAC-FIX 2026-05-24] Drop TS-only class-field declarations
+        //    of the form  `propName!: Type;`  or  `propName?: Type;`
+        //    or  `propName: Type;` written directly inside a class body
+        //    (i.e. with leading whitespace, no `=` initializer). These
+        //    are TypeScript "definite assignment" / "optional" markers
+        //    that have no JavaScript equivalent — they must be removed
+        //    entirely, otherwise the .js file fails to parse.
+        out = out.replace(
+          /^\s+[a-zA-Z_$][\w$]*[!?]?\s*:\s*[A-Za-z_$][A-Za-z_$0-9.]*(?:<[^<>]*>)?(?:\[\])?\s*;\s*$/gm,
+          ''
+        );
+        // 9. Strip array-type suffix on simple type annotations that
+        //    survived #5/#6 (e.g. `: string[]`).
+        out = out.replace(/:\s*[A-Za-z_$][A-Za-z_$0-9]*\[\]/g, '');
         return out;
       };
 
