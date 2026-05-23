@@ -309,18 +309,41 @@ export async function executePlaywrightStep(page, step, context = null) {
       await page.waitForSelector(healInfo.selector, { state: 'visible', timeout: 10000 });
       break;
 
-    case 'assertAttribute':
+    case 'assertAttribute': {
+      // [ZAC-FIX 2026-05-24] The recorder + every codegen writes the
+      // attribute name into step.value; newer callers (and the docs)
+      // use step.attribute / step.attributeName which is much clearer.
+      // Accept all three so the rerun engine matches every other layer.
+      // The expected value lives in step.expectedValue.
+      const attrName = step.attribute || step.attributeName || step.value || 'value';
+      const expectedAttr = step.expectedValue !== undefined ? String(step.expectedValue) : '';
       healInfo = await findElementWithHealing(page, step, { state: 'attached' });
-      const attrValue = await page.getAttribute(healInfo.selector, step.value || 'value');
-      const expectedAttr = step.expectedValue || '';
-      if (attrValue !== expectedAttr) {
-        throw new Error(`Expected attribute "${step.value}" to be "${expectedAttr}", got "${attrValue}"`);
+      const attrValue = await page.getAttribute(healInfo.selector, attrName);
+      // For form fields, getAttribute('value') returns the *initial* HTML
+      // attribute, not the current input value (which is the .value DOM
+      // property and changes after typing). When users assert against
+      // 'value', read the live property so the assertion matches what the
+      // user types in.
+      const live = (attrName === 'value')
+        ? await page.locator(healInfo.selector).inputValue().catch(() => null)
+        : null;
+      const actual = (live !== null && live !== undefined) ? live : attrValue;
+      if (String(actual) !== expectedAttr) {
+        throw new Error(`Expected attribute "${attrName}" to be "${expectedAttr}", got "${actual}"`);
       }
       break;
+    }
 
-    case 'screenshot':
-      await page.screenshot({ path: step.filename || 'screenshot.png' });
+    case 'screenshot': {
+      // [ZAC-FIX 2026-05-24] Playwright infers mime type from the
+      // file extension; a bare filename like "shot" 500s the rerun
+      // with "unsupported mime type 'null'". Always normalise to .png
+      // unless the caller explicitly asked for .jpg/.jpeg.
+      let filename = step.filename || 'screenshot.png';
+      if (!/\.(png|jpe?g)$/i.test(filename)) filename = `${filename}.png`;
+      await page.screenshot({ path: filename });
       break;
+    }
 
     case 'scroll':
       // Scroll can be: scroll to element, scroll to Y position, scroll to top/bottom
