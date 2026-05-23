@@ -205,12 +205,95 @@ the run still completed but as 4 soft-failures. **Fixed** in both
 
 ---
 
+---
+
+## Addendum — BDD authoring sweep (Scenario Outline / Background / multi-scenario)
+
+Added 2026-05-23 in response to the explicit follow-up
+*"did you test scenario outline / background / sanity / regression / annotations / new
+scenarios / AI on top of all this?"* The honest answer was **no, not as a
+dedicated lane** — only the underlying APIs were covered in the main
+regression. Doing it now surfaced two more production bugs, both fixed
+this turn.
+
+### What was tested
+| # | What | How | Result |
+|---|------|-----|--------|
+| 1 | `Scenario Outline` block + Examples table generation | direct call to `generateFeatureFile()` with `useScenarioOutline:true` | ✅ shape, headers, Unicode rows, feature-level tags |
+| 2 | `Background:` shared-setup block | direct call with `backgroundSteps:[...]` | ✅ Background rendered once, ahead of any Scenario |
+| 3 | Multiple Scenarios per Feature (sanity + regression + data-driven mixed) | `scenarios:[{...},{...},{...}]` | ✅ tags per-scenario, Background once at top, plain + Outline coexist |
+| 4 | Strict Gherkin grammar walk on saved-to-disk feature | written via `POST /api/projects/:id/manual-edits` then re-parsed | ✅ exactly 1 Feature / 1 Background / 2 Scenario / 1 Outline / 1 Examples; no orphan placeholders |
+| 5 | **Live data-driven Scenario Outline against demoqa.com /text-box** | `POST /api/rerun` w/ 3 Examples rows | ✅ 3 rows × 5 steps = 15 actions in 13.2s, all PASS |
+| 6 | AI assistant for BDD prompts (Outline, Background, recording→BDD, sanity vs regression tags) | `POST /api/ai/chat` to local Mistral 7B (Ollama) | ✅ all 4 prompts returned usable Gherkin in 2-20s |
+
+### Bugs found + fixed this lane
+- **BDD-1: Scenario Outline placeholders ignored Examples columns.**
+  `generators/gherkin.js` rendered every Outline step as the literal
+  token `"<value>"` regardless of which Examples column the data came
+  from. Cucumber expects the placeholder to match a column header (e.g.
+  `<Name>`, `<Email>`); a literal `<value>` with no matching column
+  means Cucumber prints it verbatim and every row runs with the wrong
+  inputs.
+  **Fix:** new `matchPlaceholder` helper in `generateStepLine`. If a
+  step value matches an Examples column → emit `<column>`; if no
+  match → keep the literal value (the step is constant across rows).
+  `step.exampleColumn` overrides for ambiguous cases. **5 new unit
+  tests** in `automation-suite/unit-js/scenario_outline.test.mjs`
+  prevent regression.
+- **BDD-2: Scenario Outline reruns were invisible on the dashboard.**
+  `executeScenarioOutline()` returned its results inline but never
+  wrote `replay-result.json` / `status.json` to disk, so
+  `/api/dashboard/stats` and `/api/dashboard/live` couldn't see them.
+  The non-Outline branch already persisted everything; the Outline
+  branch now mirrors that — same `validateLayoutInputs` +
+  `ensureRerunScaffold` + `markRerunCompleted` chain.
+  **Verified live:** 3-row Outline run lands a `replay-result.json`
+  under the canonical
+  `generated-projects/<fw>/<projectId>/reruns/<test>/<ts>/` path and
+  appears on the dashboard within 1s.
+
+### Annotations / tag suites
+Tags work end-to-end as Cucumber expects: feature-level tags placed
+above the `Feature:` line, scenario-level tags placed above each
+`Scenario:` / `Scenario Outline:` line. The suite-marker convention is
+just tag-based (`@sanity`, `@regression`, `@smoke`, `@negative`) — no
+extra ZAC support needed. Filtering happens at the Cucumber runner
+level via `--tags @sanity` etc. The `Add new scenario after current
+steps` workflow (recorder UI) appends to the same project's
+`scenarios[]` array, which the multi-scenario branch of
+`generateFeatureFile()` correctly renders as N separate `Scenario:`
+blocks under one `Background:` — see the 5th unit test.
+
+### AI assistance for BDD (Mistral 7B local)
+Direct probe of `POST /api/ai/chat` with system prompt = "senior SDET,
+reply with valid Gherkin only":
+
+| Prompt | Time | Output quality |
+|--------|------|----------------|
+| Generate Scenario Outline w/ 3 Examples for /text-box | 20.4s | Valid Outline + Examples; needs minor edit (table placement) |
+| Generate Feature with Background that logs in then searches | 9.5s | Clean Background + Scenario, ready to drop in |
+| Convert recording → Feature with Background + Outline (3 examples) | 13.8s | Clean output, Cucumber-valid |
+| Suggest tags for sanity vs regression | 2.2s | `@fast @login @shopping` vs `@slow @user @cart` |
+
+Cold-load on the first prompt was ~20s; subsequent prompts settled at
+2-14s. AI is good enough for first-draft generation; final review by a
+human SDET is still required (especially for the Examples-table layout
+in 6.1).
+
+### Result summary for this lane
+**6 tests, 6 pass, 2 bugs fixed.** Combined with the main run that's
+**356 / 356 checks** with **5 production-impacting bugs** caught and
+fixed across the session.
+
+---
+
 ## Release recommendation
 
-**Ship it.** All automated checks pass, three production-impacting bugs
-were caught and fixed during this run (autosave 429, 500s for user
-input, `fill` step kind unrecognised), and a full live demoqa.com run
-proved every layer end-to-end:
+**Ship it.** All automated checks pass, **five** production-impacting
+bugs were caught and fixed during this run (autosave 429, 500s for user
+input, `fill` step kind unrecognised, Outline placeholders ignored
+Examples columns, Outline reruns missing from dashboard), and a full
+live demoqa.com run proved every layer end-to-end:
 
 - Server-side Playwright spawn ✓
 - Real DOM interaction (navigate, fill, click, waitFor) ✓
