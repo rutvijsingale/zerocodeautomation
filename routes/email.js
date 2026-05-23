@@ -45,9 +45,12 @@ router.post('/test', strictRateLimiter, asyncHandler(async (req, res) => {
  * delivery. Body: { to?, subject? } (defaults to configured recipient).
  */
 router.post('/send-test', strictRateLimiter, asyncHandler(async (req, res) => {
-  const { to, subject } = req.body || {};
+  // [ZAC-FIX 2026-05-24] Forward cc + bcc + from in addition to to + subject
+  // so the multi-recipient feature actually works through this endpoint.
+  // emailService normalises each field (commas, semicolons, arrays).
+  const { to, cc, bcc, from, subject } = req.body || {};
   const r = await email.sendMail({
-    to,
+    to, cc, bcc, from,
     subject: subject || '[ZAC] Email subsystem test',
     text: 'This is a test email from the Zero-Code Automation IDE.\n\n' +
           'If you received this, your SMTP credentials are working.\n\n' +

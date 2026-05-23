@@ -345,7 +345,7 @@ export const __test__ = { normaliseRecipients };
  * @param {string} [args.subject]
  * @param {string} [args.note]      free-form text added above the summary
  */
-export async function sendRerunReport({ framework, projectId, testName, timestamp, to, subject, note }) {
+export async function sendRerunReport({ framework, projectId, testName, timestamp, to, cc, bcc, from, subject, note }) {
   if (!framework || !projectId || !testName || !timestamp) {
     return { ok: false, error: 'Missing one of framework/projectId/testName/timestamp' };
   }
@@ -378,7 +378,7 @@ export async function sendRerunReport({ framework, projectId, testName, timestam
   if (note) summaryRows.unshift(note, '');
 
   return sendMail({
-    to,
+    to, cc, bcc, from,
     subject: subj,
     text: summaryRows.join('\n'),
     html: `<pre style="font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.5">${summaryRows.join('\n')}</pre>` +
@@ -400,7 +400,7 @@ export async function sendRerunReport({ framework, projectId, testName, timestam
  * @param {string} [args.subject]
  * @param {string} [args.note]
  */
-export async function sendDashboardSummary({ stats, to, subject, note }) {
+export async function sendDashboardSummary({ stats, to, cc, bcc, from, subject, note }) {
   if (!stats || typeof stats !== 'object') {
     return { ok: false, error: 'Missing stats payload' };
   }
@@ -424,7 +424,7 @@ export async function sendDashboardSummary({ stats, to, subject, note }) {
 
   const subj = subject || `[ZAC] Dashboard summary — ${(stats.summary?.generatedAt || '').slice(0, 10)} (${ts.passed ?? 0}/${ts.totalCases ?? 0} passed)`;
   return sendMail({
-    to,
+    to, cc, bcc, from,
     subject: subj,
     text: rows.join('\n'),
     html: `<pre style="font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.5">${rows.join('\n')}</pre>` +

@@ -1447,8 +1447,14 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
     // still mark the run as failed.
     const overallPassed = (hardFailureCount === 0) && !wasCancelled;
     res.json({
+      // [ZAC-FIX 2026-05-24] Normalised response shape — every rerun
+      // branch (plain / Outline / multi-scenario) now returns the same
+      // top-level fields: executionId + rerunLayout. The legacy
+      // `layout` alias is kept for one cycle so existing clients don't
+      // break, but new code should read `rerunLayout`.
       success: overallPassed,
       cancelled: wasCancelled,
+      executionId,
       executedSteps: results.length,
       successCount: successCount,
       failureCount: failureCount,
@@ -1457,7 +1463,8 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
       timeoutCount,
       duration: `${(totalDuration / 1000).toFixed(2)}s`,
       results: results,
-      ...(rerunLayout ? { layout: rerunLayout } : {}),
+      rerunLayout: rerunLayout || null,
+      ...(rerunLayout ? { layout: rerunLayout } : {}),  // legacy alias
       ...(firstFailureDiagnosis ? { aiDiagnosis: firstFailureDiagnosis } : {}),
     });
 

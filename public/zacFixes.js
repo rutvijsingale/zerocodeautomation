@@ -764,7 +764,27 @@
       const desired = fromStore || fromLegacy;
       if (!desired) return; // user has no default set — leave dropdown alone
       const has = [...select.options].some(o => o.value === desired);
-      if (!has) return;     // saved default refers to a framework not in the dropdown
+      if (!has) {
+        // [ZAC-FIX 2026-05-24] Saved default refers to a framework that the
+        // Recording dropdown doesn't expose (uiVisible:false). Previously
+        // we silently bailed, leaving the dropdown on the first option
+        // — confusing UX. Now we surface the mismatch and clear the
+        // stale value so subsequent loads don't keep falling back.
+        const visible = [...select.options].map(o => o.value).filter(Boolean);
+        console.warn(
+          '[ZAC-FIX] Settings default "' + desired + '" is hidden from the Recording dropdown ' +
+          '(uiVisible:false). Visible options: ' + visible.join(', ') + '. Clearing stale default.'
+        );
+        try { showToast(
+          'Default framework "' + desired + '" is not selectable in Recording. Clearing default; pick one again from Settings.',
+          'warn', 6000
+        ); } catch (_) { /* showToast may not be wired yet */ }
+        try {
+          localStorage.removeItem('zac.defaultFramework');
+          if (window.ZacSettings) window.ZacSettings.set({ defaultFramework: '' });
+        } catch (_) { /* best effort */ }
+        return;
+      }
       if (select.value !== desired) {
         select.value = desired;
         // Fire a synthetic change so app.js / save logic notice.

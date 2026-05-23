@@ -79,7 +79,17 @@
       const resp = await fetch('/api/frameworks');
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const r = await resp.json();
-      const list = Array.isArray(r.frameworks) ? r.frameworks : [];
+      const all = Array.isArray(r.frameworks) ? r.frameworks : [];
+      // [ZAC-FIX 2026-05-24] The Recording tab's #framework dropdown
+      // hides any framework with uiVisible:false (currently
+      // playwright-typescript). Previously this Settings dropdown
+      // listed ALL of them, which created an inconsistency: a user
+      // could pick "playwright-typescript" here and the Recording tab
+      // would silently fall back to playwright-java because the option
+      // didn't exist. Filter to the same uiVisible subset so what you
+      // see in Settings is what you get in Recording.
+      const list = all.filter((f) => f && f.uiVisible !== false);
+      const hidden = all.length - list.length;
       // Build a fresh list — atomic replace so the dropdown can never end
       // up with the placeholder alone if the loop trips midway.
       const opts = [
@@ -93,6 +103,9 @@
       }
       sel.innerHTML = '';
       for (const o of opts) sel.appendChild(o);
+      if (hidden > 0) {
+        console.log('[ZAC-FIX] hid', hidden, 'framework(s) flagged uiVisible:false from #defaultFramework');
+      }
 
       // Restore saved default (legacy localStorage key wins; ZacSettings backstop).
       const saved = localStorage.getItem(STORAGE_KEY)
