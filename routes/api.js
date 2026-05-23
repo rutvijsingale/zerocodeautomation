@@ -3701,7 +3701,13 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
     const projectName = projectData.name || projectId;
     const steps = projectData.steps || [];
     
-    if (steps.length === 0) {
+    // [ZAC-FIX] Multi-scenario projects (the "Add new scenario" flow)
+    // store their steps under project.scenarios[i].steps and may have
+    // an empty top-level steps[]. Treat that as valid — only reject when
+    // BOTH are empty / missing.
+    const totalScenarioSteps = (Array.isArray(projectData.scenarios) ? projectData.scenarios : [])
+      .reduce((acc, s) => acc + ((s && Array.isArray(s.steps)) ? s.steps.length : 0), 0);
+    if (steps.length === 0 && totalScenarioSteps === 0) {
       return res.status(400).json({
         success: false,
         error: 'No steps found in project. Please record some steps first.'
@@ -3830,7 +3836,14 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
       if (Object.keys(pageLocatorsMap).length > 0) {
         const pagesDir = path.join(srcTestJava, 'pages');
         await fileService.ensureDirectory(pagesDir);
-        const frameworkType = finalFramework === 'selenium-java' ? 'selenium-java' : 'playwright-ts';
+        // [ZAC-FIX] When the framework is playwright-java, pass it
+        // through directly so generateAllPageObjects emits real Java
+        // (Playwright Java API). Previously this branch forced
+        // 'playwright-ts', producing TypeScript files written into
+        // .java filenames — uncompilable.
+        const frameworkType = finalFramework === 'selenium-java' ? 'selenium-java'
+                            : finalFramework === 'playwright-java' ? 'playwright-java'
+                            : 'playwright-ts';
         const pageObjects = pageObjectGenerators.generateAllPageObjects(pageLocatorsMap, frameworkType);
         
         for (const [pageName, pageCode] of Object.entries(pageObjects)) {
@@ -3863,12 +3876,31 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
       );
       
       // Generate feature file (parallel)
+      // [ZAC-FIX] Honour project.scenarios + project.backgroundSteps so
+      // multi-scenario / Background recordings (the "Add new scenario
+      // after current steps" flow + "Mark next steps as Background"
+      // toggle) actually shape the generated .feature. Previously this
+      // route only passed `steps`, so all scenarios were merged into a
+      // single Scenario block and any Background was lost.
       console.log(`[Generate Files] Generating feature file...`);
+      const projectScenarios = Array.isArray(projectData.scenarios) && projectData.scenarios.length > 0
+        ? projectData.scenarios.map(s => ({
+            title: s.name || s.title,
+            tags: s.tags || [],
+            steps: s.steps || [],
+            useScenarioOutline: !!s.useScenarioOutline,
+            examples: Array.isArray(s.examples) ? s.examples : [],
+          }))
+        : null;
       const featureContent = gherkinGenerator.generateFeatureFile({
         featureName: finalFeatureName,
         featureTitle: finalFeatureTitle,
         tags: finalTags,
-        steps: steps
+        steps: steps,
+        backgroundSteps: Array.isArray(projectData.backgroundSteps) ? projectData.backgroundSteps : [],
+        useScenarioOutline: !!projectData.useScenarioOutline,
+        examples: Array.isArray(projectData.examples) ? projectData.examples : [],
+        scenarios: projectScenarios,
       });
       const featureDir = path.join(srcTestResources, 'features');
       await fileService.ensureDirectory(featureDir);
@@ -3984,15 +4016,26 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
       await fileService.ensureDirectory(featureDir);
       await fileService.ensureDirectory(stepsDir);
       
+      // [ZAC-FIX] Same multi-scenario / Background plumbing as the Java
+      // branch above — applies to the TS/JS Cucumber+Playwright bundle.
+      const projectScenarios = Array.isArray(projectData.scenarios) && projectData.scenarios.length > 0
+        ? projectData.scenarios.map(s => ({
+            title: s.name || s.title,
+            tags: s.tags || [],
+            steps: s.steps || [],
+            useScenarioOutline: !!s.useScenarioOutline,
+            examples: Array.isArray(s.examples) ? s.examples : [],
+          }))
+        : null;
       const featureContent = gherkinGenerator.generateFeatureFile({
         featureName: finalFeatureName,
         featureTitle: finalFeatureTitle,
         tags: finalTags,
         steps: steps,
-        backgroundSteps: [],
-        useScenarioOutline: false,
-        examples: [],
-        scenarios: null
+        backgroundSteps: Array.isArray(projectData.backgroundSteps) ? projectData.backgroundSteps : [],
+        useScenarioOutline: !!projectData.useScenarioOutline,
+        examples: Array.isArray(projectData.examples) ? projectData.examples : [],
+        scenarios: projectScenarios,
       });
       const featureFileName = finalFeatureTitle.replace(/[^a-zA-Z0-9]/g, '') || 'RecordedTest';
       const featurePath = path.join(featureDir, `${featureFileName}.feature`);

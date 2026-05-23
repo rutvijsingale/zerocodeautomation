@@ -157,6 +157,93 @@ ${methods}
 `;
 }
 
+// [ZAC-FIX] Page Object generator for the playwright-java framework.
+//
+// Without this, generateAllPageObjects() routed playwright-java callers
+// to the playwright-ts generator, which emits TypeScript. The route
+// then wrote that TypeScript into a file named `${pageName}Page.java`,
+// producing files that look like:
+//
+//     // TextBoxPage.java
+//     import { Page, Locator } from '@playwright/test';
+//     export class TextBoxPage { … }
+//
+// That can never compile. Step definitions generated for
+// playwright-java already do `import pages.${pageName}Page;` and call
+// methods like `new TextBoxPage().clickSubmit()`, so the missing piece
+// is a real Java page-object using Playwright's Java API
+// (`com.microsoft.playwright.{Page,Locator}` + the static
+// `support.PlaywrightWorld.getPage()` accessor that the World class
+// already exposes).
+export function generatePlaywrightJavaPageObject(pageName, locators = [], options = {}) {
+  const className = `${pageName}Page`;
+  // One Locator getter per element. Uses the per-instance `page` field
+  // so callers can either (a) instantiate with the World's Page via
+  // `new ${className}(getPage())` or (b) use the no-arg constructor
+  // which falls back to the static accessor — both paths produce the
+  // same Locator behaviour.
+  const locatorMethods = locators.map(loc => {
+    const propertyName = toCamelCase(loc.elementName);
+    const sel = String(loc.locatorValue || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return `    public Locator ${propertyName}() {
+        return this.page.locator("${sel}");
+    }`;
+  }).join('\n\n');
+
+  // High-level convenience methods — keep semantics identical to the TS
+  // page object: clickX, fillX (for text-like fields), selectX. The
+  // recorder marks fields it would have typed into; everything else
+  // gets a click helper.
+  const helperMethods = locators.map(loc => {
+    const propertyName = toCamelCase(loc.elementName);
+    const cap = propertyName.charAt(0).toUpperCase() + propertyName.slice(1);
+    const lower = (loc.elementName || '').toLowerCase();
+    const isInput = /input|field|name|email|password|search|address|phone/.test(lower) || /textarea|input/i.test(loc.locatorType || '');
+    if (isInput) {
+      return `    public void fill${cap}(String value) {
+        ${propertyName}().fill(value);
+    }`;
+    }
+    return `    public void click${cap}() {
+        ${propertyName}().click();
+    }`;
+  }).join('\n\n');
+
+  // The step-definition generator emits `new ${pageName}Page(getPage())`,
+  // so we MUST expose a constructor that accepts a Page. We also keep a
+  // no-arg constructor that falls back to the static accessor, so older
+  // step defs (and direct REPL use) still work.
+  return `package pages;
+
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Locator;
+import static support.PlaywrightWorld.getPage;
+
+/**
+ * ${className} - Page Object for ${pageName}
+ *
+ * Generated automatically from locator repository.
+ * Uses Playwright's Java API. Each element is exposed as a Locator
+ * getter; common interactions are exposed as fluent helpers.
+ */
+public class ${className} {
+
+    private final Page page;
+
+    public ${className}() {
+        this.page = getPage();
+    }
+
+    public ${className}(Page page) {
+        this.page = page;
+    }
+
+${locatorMethods ? locatorMethods + '\n' : ''}
+${helperMethods ? helperMethods + '\n' : ''}
+}
+`;
+}
+
 /**
  * Generate Playwright TypeScript Page Object class
  * @param {string} pageName - Page name (e.g., "LoginPage")
@@ -452,6 +539,10 @@ export function generateAllPageObjects(pageLocatorsMap, framework, options = {})
     const normalised = normaliseLocators(locators);
     if (framework === 'selenium-java') {
       result[pageName] = generateSeleniumPageObject(pageName, normalised, options);
+    } else if (framework === 'playwright-java') {
+      // [ZAC-FIX] Playwright + Java needs a Java page object using
+      // com.microsoft.playwright.{Page,Locator} — not the TS generator.
+      result[pageName] = generatePlaywrightJavaPageObject(pageName, normalised, options);
     } else if (framework === 'playwright-ts') {
       result[pageName] = generatePlaywrightPageObject(pageName, normalised, options);
     }
