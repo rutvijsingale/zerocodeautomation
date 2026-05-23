@@ -410,8 +410,16 @@ function generateJavaStepDefinitions(framework, stepDefMap, groupedActions, base
   };
   
   // Always include common step definitions regardless of stepDefMap
-  // This ensures standard steps are always available for both frameworks
+  // This ensures standard steps are always available for both frameworks.
+  //
+  // [ZAC-FIX 2026-05-24] Greatly expanded so every step kind the recorder
+  // can produce has a guaranteed matching @annotation in the generated
+  // .java. Without these entries, recordings using doubleClick / hover /
+  // dragDrop / check / uncheck / selectRadio / fileUpload / keyPress /
+  // scroll / waitFor / waitForSelector / screenshot / apiCall would
+  // compile but throw "Undefined step" the moment Cucumber executed.
   const commonSteps = {
+    // Existing core
     'Given I navigate to {string}': true,
     'When I click {string}': true,
     'And I click {string}': true,
@@ -421,7 +429,23 @@ function generateJavaStepDefinitions(framework, stepDefMap, groupedActions, base
     'And I select {string} from {string}': true,
     'Then I should see {string} in {string}': true,
     'Then {string} should be visible': true,
-    'And I close the browser': true
+    'And I close the browser': true,
+
+    // [ZAC-FIX] Newly always-emitted matchers for missing step kinds.
+    'And I double click {string}': true,
+    'And I hover over {string}': true,
+    'And I drag {string} to {string}': true,
+    'And I check {string}': true,
+    'And I uncheck {string}': true,
+    'And I select radio {string} in {string}': true,
+    'And I upload {string} to {string}': true,
+    'And I press key {string}': true,
+    'And I scroll to position ({int}, {int})': true,
+    'And I scroll to {string}': true,
+    'And I wait for {int} ms': true,
+    'And I wait for selector {string}': true,
+    'And I take screenshot {string}': true,
+    'And I call API {word} {string}': true,
   };
   
   // Merge common steps with stepDefMap
@@ -2073,6 +2097,225 @@ function generateJavaStepDefinitions(framework, stepDefMap, groupedActions, base
     lines.push('');
   }
   
+  // ──────────────────────────────────────────────────────────────────────
+  // [ZAC-FIX 2026-05-24] Step-defs that the feature-file generator emits
+  // but the Java step-def generator was missing. Without these 12+
+  // blocks, any recording that used doubleClick / hover / dragDrop /
+  // check / uncheck / selectRadio / fileUpload / keyPress / scroll /
+  // waitFor / waitForSelector / screenshot / apiCall would compile fine
+  // but throw "Undefined step" the moment Cucumber executes the run.
+  //
+  // Each block:
+  //   1. Probes the stepDefMap for the pattern emitted by gherkin.js
+  //   2. Picks the highest-priority annotation (Given > When > Then > And)
+  //   3. Emits a framework-specific body (Selenium WebDriver vs
+  //      Playwright Java) that's idempotent + uses the existing
+  //      SELECTOR_FALLBACKS_BY_PRIMARY healing helper when sensible.
+  // ──────────────────────────────────────────────────────────────────────
+  const isPw = framework === 'playwright-java';
+  const emitStep = (patterns, paramSig, bodyLines) => {
+    const found = patterns.find(p => stepDefMap[p]);
+    if (!found) return;
+    const kw = found.match(/^(Given|When|Then|And)/)[1];
+    // Strip the leading keyword + space for the @annotation literal.
+    const rest = found.replace(/^(Given|When|Then|And)\s+/, '');
+    lines.push(`    @${kw}("${rest}")`);
+    lines.push(`    public void ${paramSig} {`);
+    bodyLines.forEach(l => lines.push('        ' + l));
+    lines.push('    }');
+    lines.push('');
+  };
+
+  // doubleClick
+  emitStep(
+    ['And I double click {string}', 'When I double click {string}'],
+    'iDoubleClick(String selector)',
+    isPw
+      ? ['getPage().locator(selector).dblclick();']
+      : [
+          'org.openqa.selenium.WebElement el = getDriver().findElement(By.cssSelector(selector));',
+          'new org.openqa.selenium.interactions.Actions(getDriver()).doubleClick(el).perform();',
+        ],
+  );
+
+  // hover
+  emitStep(
+    ['And I hover over {string}', 'When I hover over {string}'],
+    'iHoverOver(String selector)',
+    isPw
+      ? ['getPage().locator(selector).hover();']
+      : [
+          'org.openqa.selenium.WebElement el = getDriver().findElement(By.cssSelector(selector));',
+          'new org.openqa.selenium.interactions.Actions(getDriver()).moveToElement(el).perform();',
+        ],
+  );
+
+  // dragDrop
+  emitStep(
+    ['And I drag {string} to {string}', 'When I drag {string} to {string}'],
+    'iDragDrop(String sourceSelector, String targetSelector)',
+    isPw
+      ? ['getPage().locator(sourceSelector).dragTo(getPage().locator(targetSelector));']
+      : [
+          'org.openqa.selenium.WebElement src = getDriver().findElement(By.cssSelector(sourceSelector));',
+          'org.openqa.selenium.WebElement tgt = getDriver().findElement(By.cssSelector(targetSelector));',
+          'new org.openqa.selenium.interactions.Actions(getDriver()).dragAndDrop(src, tgt).perform();',
+        ],
+  );
+
+  // check (set checkbox to checked)
+  emitStep(
+    ['And I check {string}', 'When I check {string}'],
+    'iCheck(String selector)',
+    isPw
+      ? ['getPage().locator(selector).check();']
+      : [
+          'org.openqa.selenium.WebElement el = getDriver().findElement(By.cssSelector(selector));',
+          'if (!el.isSelected()) el.click();',
+        ],
+  );
+
+  // uncheck
+  emitStep(
+    ['And I uncheck {string}', 'When I uncheck {string}'],
+    'iUncheck(String selector)',
+    isPw
+      ? ['getPage().locator(selector).uncheck();']
+      : [
+          'org.openqa.selenium.WebElement el = getDriver().findElement(By.cssSelector(selector));',
+          'if (el.isSelected()) el.click();',
+        ],
+  );
+
+  // selectRadio
+  emitStep(
+    ['And I select radio {string} in {string}', 'When I select radio {string} in {string}'],
+    'iSelectRadio(String value, String groupSelector)',
+    isPw
+      ? [
+          'String xp = groupSelector + "[value=\\"" + value + "\\"]";',
+          'getPage().locator(xp).check();',
+        ]
+      : [
+          'java.util.List<org.openqa.selenium.WebElement> radios = getDriver().findElements(By.cssSelector(groupSelector));',
+          'for (org.openqa.selenium.WebElement r : radios) {',
+          '    if (value.equals(r.getAttribute("value")) && !r.isSelected()) { r.click(); return; }',
+          '}',
+        ],
+  );
+
+  // fileUpload
+  emitStep(
+    ['And I upload {string} to {string}', 'When I upload {string} to {string}'],
+    'iUpload(String filename, String selector)',
+    isPw
+      ? [
+          'java.nio.file.Path file = java.nio.file.Paths.get(filename);',
+          'getPage().locator(selector).setInputFiles(file);',
+        ]
+      : [
+          'org.openqa.selenium.WebElement el = getDriver().findElement(By.cssSelector(selector));',
+          'java.io.File file = new java.io.File(filename);',
+          'el.sendKeys(file.getAbsolutePath());',
+        ],
+  );
+
+  // keyPress
+  emitStep(
+    ['And I press key {string}', 'When I press key {string}'],
+    'iPressKey(String key)',
+    isPw
+      ? ['getPage().keyboard().press(key);']
+      : [
+          'new org.openqa.selenium.interactions.Actions(getDriver())',
+          '    .sendKeys(org.openqa.selenium.Keys.valueOf(key.toUpperCase())).perform();',
+        ],
+  );
+
+  // scroll to position (x, y)
+  emitStep(
+    ['And I scroll to position ({int}, {int})', 'When I scroll to position ({int}, {int})'],
+    'iScrollToXY(Integer x, Integer y)',
+    isPw
+      ? ['getPage().evaluate("window.scrollTo(" + x + ", " + y + ");");']
+      : ['((org.openqa.selenium.JavascriptExecutor) getDriver()).executeScript("window.scrollTo(" + x + ", " + y + ");");'],
+  );
+
+  // scroll to element selector
+  emitStep(
+    ['And I scroll to {string}', 'When I scroll to {string}'],
+    'iScrollToSelector(String selector)',
+    isPw
+      ? ['getPage().locator(selector).scrollIntoViewIfNeeded();']
+      : [
+          'org.openqa.selenium.WebElement el = getDriver().findElement(By.cssSelector(selector));',
+          '((org.openqa.selenium.JavascriptExecutor) getDriver()).executeScript("arguments[0].scrollIntoView({behavior:\\"smooth\\", block:\\"center\\"});", el);',
+        ],
+  );
+
+  // waitFor (sleep N ms)
+  emitStep(
+    ['And I wait for {int} ms', 'When I wait for {int} ms'],
+    'iWaitForMs(Integer ms)',
+    isPw
+      ? ['getPage().waitForTimeout(ms);']
+      : [
+          'try { Thread.sleep(ms); }',
+          'catch (InterruptedException e) { Thread.currentThread().interrupt(); }',
+        ],
+  );
+
+  // waitForSelector
+  emitStep(
+    ['And I wait for selector {string}', 'When I wait for selector {string}'],
+    'iWaitForSelector(String selector)',
+    isPw
+      ? ['getPage().waitForSelector(selector);']
+      : [
+          'new org.openqa.selenium.support.ui.WebDriverWait(getDriver(), java.time.Duration.ofSeconds(15))',
+          '    .until(org.openqa.selenium.support.ui.ExpectedConditions.visibilityOfElementLocated(By.cssSelector(selector)));',
+        ],
+  );
+
+  // screenshot
+  emitStep(
+    ['And I take screenshot {string}', 'When I take screenshot {string}'],
+    'iTakeScreenshot(String filename)',
+    isPw
+      ? [
+          'java.nio.file.Path out = java.nio.file.Paths.get(filename);',
+          'getPage().screenshot(new com.microsoft.playwright.Page.ScreenshotOptions().setPath(out));',
+        ]
+      : [
+          'java.io.File src = ((org.openqa.selenium.TakesScreenshot) getDriver()).getScreenshotAs(org.openqa.selenium.OutputType.FILE);',
+          'try { java.nio.file.Files.copy(src.toPath(), java.nio.file.Paths.get(filename), java.nio.file.StandardCopyOption.REPLACE_EXISTING); }',
+          'catch (java.io.IOException e) { throw new RuntimeException("Screenshot save failed: " + filename, e); }',
+        ],
+  );
+
+  // apiCall — pure Java HTTP, framework-agnostic, just needs java.net.http
+  emitStep(
+    ['And I call API {word} {string}', 'When I call API {word} {string}'],
+    'iCallApi(String method, String url)',
+    [
+      'try {',
+      '    java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();',
+      '    java.net.http.HttpRequest.Builder req = java.net.http.HttpRequest.newBuilder()',
+      '        .uri(java.net.URI.create(url));',
+      '    switch (method.toUpperCase()) {',
+      '        case "POST":   req.POST(java.net.http.HttpRequest.BodyPublishers.noBody()); break;',
+      '        case "PUT":    req.PUT(java.net.http.HttpRequest.BodyPublishers.noBody());  break;',
+      '        case "DELETE": req.DELETE(); break;',
+      '        default:       req.GET();',
+      '    }',
+      '    java.net.http.HttpResponse<String> resp = client.send(req.build(), java.net.http.HttpResponse.BodyHandlers.ofString());',
+      '    System.out.println("[apiCall] " + method + " " + url + " -> " + resp.statusCode());',
+      '} catch (Exception e) {',
+      '    throw new RuntimeException("apiCall failed: " + e.getMessage(), e);',
+      '}',
+    ],
+  );
+
   // Page wait step - Always available if used in feature file
   const hasPageWaitStep = stepDefMap['Given I Am On S Page'] || stepDefMap['And I Am On S Page'];
   if (hasPageWaitStep) {
