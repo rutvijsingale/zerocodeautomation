@@ -198,11 +198,29 @@ import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.firefox.FirefoxDriver;
 import org.openqa.selenium.firefox.FirefoxOptions;
 import org.openqa.selenium.safari.SafariDriver;
+import org.openqa.selenium.remote.RemoteWebDriver;
 import io.cucumber.java.After;
 import io.cucumber.java.Before;
+import java.net.URL;
 import java.time.Duration;
 import java.util.Arrays;
 
+/**
+ * SeleniumWorld - shared WebDriver lifecycle for all step definitions.
+ *
+ * Selenium Grid support (added 2026-05-24):
+ *   Set SELENIUM_HUB_URL (or zac.seleniumHubUrl JVM property) to the hub
+ *   endpoint, e.g. http://grid.example.com:4444/wd/hub. When the env
+ *   var is present, the World instantiates a RemoteWebDriver against
+ *   the grid using the same browser-type capabilities; when it's absent
+ *   it falls back to a local driver — so the same generated JAR works
+ *   on a developer laptop AND on a CI farm without recompile.
+ *
+ * Browser selection precedence:
+ *   1. ZAC_BROWSER env var       (CI: any of chrome|firefox|edge|safari)
+ *   2. zac.browser JVM prop      (mvn -Dzac.browser=firefox test)
+ *   3. compiled-in default below
+ */
 public class SeleniumWorld {
     private static WebDriver driver;
 
@@ -210,42 +228,85 @@ public class SeleniumWorld {
         return driver;
     }
 
-    @Before
-    public void init() {
-        String browserType = "${seleniumBrowserType}";
+    private static String resolveBrowserType() {
+        String env = System.getenv("ZAC_BROWSER");
+        if (env != null && !env.isEmpty()) return env;
+        String prop = System.getProperty("zac.browser");
+        if (prop != null && !prop.isEmpty()) return prop;
+        return "${seleniumBrowserType}";
+    }
 
-        switch (browserType.toLowerCase()) {
-            case "firefox":
-                FirefoxOptions firefoxOptions = new FirefoxOptions();
-                ${headless ? 'firefoxOptions.addArguments("--headless");' : ''}
-                ${args.length > 0 ? `firefoxOptions.addArguments(${args.map(arg => `"${arg}"`).join(', ')});` : ''}
-                driver = new FirefoxDriver(firefoxOptions);
-                break;
-            case "edge":
-                // Edge uses Chromium, so we use ChromeOptions with Edge binary
-                ChromeOptions edgeOptions = new ChromeOptions();
-                edgeOptions.setBinary("C:\\\\Program Files (x86)\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe");
-                ${headless ? 'edgeOptions.addArguments("--headless");' : ''}
-                edgeOptions.addArguments("--start-maximized");
-                edgeOptions.addArguments("--disable-blink-features=AutomationControlled");
-                ${args.length > 0 ? `edgeOptions.addArguments(${args.map(arg => `"${arg}"`).join(', ')});` : ''}
-                driver = new ChromeDriver(edgeOptions);
-                break;
-            case "safari":
-                driver = new SafariDriver();
-                break;
-            default: // chrome
-                ChromeOptions chromeOptions = new ChromeOptions();
-                ${headless ? 'chromeOptions.addArguments("--headless");' : ''}
-                chromeOptions.addArguments("--start-maximized");
-                chromeOptions.addArguments("--disable-blink-features=AutomationControlled");
-                ${args.length > 0 ? `chromeOptions.addArguments(${args.map(arg => `"${arg}"`).join(', ')});` : ''}
-                driver = new ChromeDriver(chromeOptions);
-                break;
+    private static String resolveHubUrl() {
+        // Either SELENIUM_HUB_URL env var or zac.seleniumHubUrl JVM prop
+        // (so users can pass it via mvn -Dzac.seleniumHubUrl=... ).
+        String env = System.getenv("SELENIUM_HUB_URL");
+        if (env != null && !env.isEmpty()) return env;
+        String prop = System.getProperty("zac.seleniumHubUrl");
+        if (prop != null && !prop.isEmpty()) return prop;
+        return null; // run locally
+    }
+
+    @Before
+    public void init() throws Exception {
+        String browserType = resolveBrowserType();
+        String hubUrl = resolveHubUrl();
+
+        // Build per-browser capabilities first so they work identically
+        // for local AND remote driver paths.
+        ChromeOptions chromeOptions   = new ChromeOptions();
+        FirefoxOptions firefoxOptions = new FirefoxOptions();
+        ${headless ? 'chromeOptions.addArguments("--headless=new"); firefoxOptions.addArguments("--headless");' : ''}
+        chromeOptions.addArguments("--start-maximized");
+        chromeOptions.addArguments("--disable-blink-features=AutomationControlled");
+        ${args.length > 0 ? `chromeOptions.addArguments(${args.map(arg => `"${arg}"`).join(', ')});` : ''}
+        ${args.length > 0 ? `firefoxOptions.addArguments(${args.map(arg => `"${arg}"`).join(', ')});` : ''}
+
+        if (hubUrl != null) {
+            // ────── Selenium Grid path ──────
+            System.out.println("[SeleniumWorld] Using Grid: " + hubUrl + " (browser=" + browserType + ")");
+            switch (browserType.toLowerCase()) {
+                case "firefox":
+                    driver = new RemoteWebDriver(new URL(hubUrl), firefoxOptions);
+                    break;
+                case "edge":
+                    // Edge uses Chromium options; the Grid node decides the binary.
+                    driver = new RemoteWebDriver(new URL(hubUrl), chromeOptions);
+                    break;
+                case "safari":
+                    org.openqa.selenium.safari.SafariOptions safariOptions = new org.openqa.selenium.safari.SafariOptions();
+                    driver = new RemoteWebDriver(new URL(hubUrl), safariOptions);
+                    break;
+                default: // chrome / chromium
+                    driver = new RemoteWebDriver(new URL(hubUrl), chromeOptions);
+                    break;
+            }
+        } else {
+            // ────── Local driver path ──────
+            switch (browserType.toLowerCase()) {
+                case "firefox":
+                    driver = new FirefoxDriver(firefoxOptions);
+                    break;
+                case "edge":
+                    // Edge uses Chromium binary on Windows; fall through to Chrome options.
+                    ChromeOptions edgeOptions = new ChromeOptions();
+                    edgeOptions.setBinary("C:\\\\Program Files (x86)\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe");
+                    ${headless ? 'edgeOptions.addArguments("--headless=new");' : ''}
+                    edgeOptions.addArguments("--start-maximized");
+                    edgeOptions.addArguments("--disable-blink-features=AutomationControlled");
+                    ${args.length > 0 ? `edgeOptions.addArguments(${args.map(arg => `"${arg}"`).join(', ')});` : ''}
+                    driver = new ChromeDriver(edgeOptions);
+                    break;
+                case "safari":
+                    driver = new SafariDriver();
+                    break;
+                default: // chrome / chromium
+                    driver = new ChromeDriver(chromeOptions);
+                    break;
+            }
         }
 
         driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-        driver.manage().window().maximize();
+        try { driver.manage().window().maximize(); } catch (Exception ignored) { /* not all grid nodes support */ }
     }
 
     @After
@@ -2292,10 +2353,20 @@ function generateMavenPom(framework, projectName, baseUrl) {
 }
 
 function generateCucumberProperties() {
+  // [ZAC-FIX 2026-05-24] Defaults stay sequential (safe, deterministic).
+  // QA can flip on parallel scenario execution via either:
+  //   • mvn -Dcucumber.execution.parallel.enabled=true \
+  //         -Dcucumber.execution.parallel.config.strategy=dynamic \
+  //         -Dcucumber.execution.parallel.config.dynamic.factor=1 test
+  //   • Or, in CI, set the same keys as <systemPropertyVariables> on
+  //     maven-surefire-plugin. JVM properties override these literals.
+  // When parallel is on, dynamic strategy picks N = CPUs * factor.
   return `cucumber.publish.quiet=true
 cucumber.filter.tags=@recorded
 cucumber.plugin=pretty,html:target/cucumber-reports/html-report.html,json:target/cucumber-reports/cucumber.json,junit:target/cucumber-reports/cucumber.xml,io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm
 cucumber.execution.parallel.enabled=false
+cucumber.execution.parallel.config.strategy=dynamic
+cucumber.execution.parallel.config.dynamic.factor=1
 cucumber.execution.strict=true
 cucumber.snippet-type=camelcase`;
 }

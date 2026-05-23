@@ -770,7 +770,19 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
     //                        step.assertMode wins when set.
     stepTimeoutMs = 30000,
     defaultAssertMode = 'hard',
+    // [ZAC-FIX 2026-05-24] Multi-scenario rerun. When provided, the
+    // route iterates over each scenario.steps[] sequentially within
+    // ONE browser session and reports per-scenario results. Lets QA
+    // run the full Cucumber suite of a project (the "Add new scenario
+    // after current steps" flow saves N scenarios; until now /api/rerun
+    // could only execute one flat steps[] array per call). Each entry:
+    //   { name?: string, tags?: string[], steps: Action[] }
+    scenarios = null,
   } = req.body;
+
+  if (Array.isArray(scenarios) && scenarios.length > 0) {
+    return await executeMultiScenario(req, res, scenarios, browserType, baseUrl, headless, stopOnFailure, projectId, rerunFramework, rerunTestName, stepTimeoutMs, defaultAssertMode);
+  }
 
   if (!steps || !Array.isArray(steps) || steps.length === 0) {
     throw new Error('No steps provided to execute');
@@ -1473,6 +1485,220 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
 }));
 
 // Execute Scenario Outline - runs scenario multiple times with different data
+// [ZAC-FIX 2026-05-24] Multi-scenario rerun. Iterates through every
+// scenario inside the same browser session and aggregates results into
+// one replay-result.json so the dashboard sees a single rerun event
+// with N nested scenarios — exactly how Cucumber would report a
+// suite-level run.
+//
+// Why one browser per call (not per scenario): scenarios in the same
+// project usually share state (cookies, login). Keeping the same
+// context mirrors what `mvn test` does when scenarios live in one
+// Feature file. If a future use case wants isolation, a new
+// `scenarioIsolation: true` flag can drop+recreate the context per
+// scenario without touching this branch.
+async function executeMultiScenario(req, res, scenarios, browserType, baseUrl, headless, stopOnFailure, projectId, framework, testName, stepTimeoutMs, defaultAssertMode) {
+  const executionId = `rerun_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  console.log(`[Rerun] Multi-scenario execution ${executionId} — ${scenarios.length} scenario(s)`);
+
+  const startTime = Date.now();
+  let browser, context, page;
+  const allScenarioResults = [];
+  const flatStepResults = []; // stays compatible with replay-result.json shape
+
+  const executionState = {
+    cancelled: false, browser: null, context: null, page: null,
+    framework: framework || null,
+    projectId: projectId || null,
+    testName: testName || 'multi-scenario',
+    startedAt: new Date(startTime).toISOString(),
+  };
+  runningReruns.set(executionId, executionState);
+  mostRecentExecutionId = executionId;
+
+  try {
+    const { chromium, firefox, webkit } = await import('playwright');
+    const launcher = browserType === 'firefox' ? firefox : browserType === 'webkit' ? webkit : chromium;
+    browser = await launcher.launch({ headless, args: buildRerunLaunchArgs(browserType, headless) });
+    executionState.browser = browser;
+    context = await browser.newContext();
+    executionState.context = context;
+    page = await context.newPage();
+    executionState.page = page;
+
+    const { executePlaywrightStep } = await import('../utils/stepHandlers.js');
+
+    for (let scIdx = 0; scIdx < scenarios.length; scIdx++) {
+      if (executionState.cancelled) break;
+      const sc = scenarios[scIdx] || {};
+      const scenarioName = sc.name || sc.title || `Scenario ${scIdx + 1}`;
+      const scenarioSteps = Array.isArray(sc.steps) ? sc.steps : [];
+      const scenarioTags  = Array.isArray(sc.tags)  ? sc.tags  : [];
+      console.log(`[Rerun] ── Scenario ${scIdx + 1}/${scenarios.length}: "${scenarioName}" (${scenarioSteps.length} steps)`);
+
+      const scenarioStart = Date.now();
+      const scenarioStepResults = [];
+      let scenarioFailed = false;
+
+      for (let i = 0; i < scenarioSteps.length; i++) {
+        if (executionState.cancelled) break;
+        const step = scenarioSteps[i];
+        const stepStart = Date.now();
+        try {
+          if (!page || page.isClosed()) {
+            page = await context.newPage();
+            executionState.page = page;
+          }
+          const result = await executePlaywrightStep(page, step, context);
+          if (step.kind === 'close' && result === null) {
+            page = null;
+            executionState.page = null;
+          }
+          const row = {
+            scenario: scenarioName,
+            scenarioIndex: scIdx,
+            step: step.kind,
+            success: true,
+            duration: Date.now() - stepStart,
+          };
+          if (result && typeof result === 'object' && result.healing) {
+            row.healing = result.healing;
+            if (result.rescuedBy) row.rescuedBy = result.rescuedBy;
+          }
+          scenarioStepResults.push(row);
+          flatStepResults.push(row);
+        } catch (err) {
+          scenarioFailed = true;
+          const row = {
+            scenario: scenarioName,
+            scenarioIndex: scIdx,
+            step: step.kind,
+            success: false,
+            duration: Date.now() - stepStart,
+            error: err && err.message ? err.message : String(err),
+          };
+          scenarioStepResults.push(row);
+          flatStepResults.push(row);
+          if (stopOnFailure) break;
+        }
+      }
+
+      allScenarioResults.push({
+        name: scenarioName,
+        tags: scenarioTags,
+        success: !scenarioFailed && !executionState.cancelled,
+        durationMs: Date.now() - scenarioStart,
+        executedSteps: scenarioStepResults.length,
+        successCount: scenarioStepResults.filter(r => r.success).length,
+        failureCount: scenarioStepResults.filter(r => !r.success).length,
+        steps: scenarioStepResults,
+      });
+
+      if (scenarioFailed && stopOnFailure) {
+        console.log(`[Rerun] stopOnFailure — aborting after scenario "${scenarioName}"`);
+        break;
+      }
+    }
+
+    const totalDuration = Date.now() - startTime;
+    const successCount = flatStepResults.filter(r => r.success).length;
+    const failureCount = flatStepResults.filter(r => !r.success).length;
+    const passedScenarios = allScenarioResults.filter(s => s.success).length;
+    const failedScenarios = allScenarioResults.filter(s => !s.success).length;
+
+    // Persist to disk (same canonical layout as the single-scenario
+    // and Outline branches so /api/dashboard/* sees it identically).
+    let rerunLayout = null;
+    if (projectId && framework && testName) {
+      try {
+        const fsp = await import('fs/promises');
+        const layout = await import('../services/projectLayout.js');
+        const validation = await layout.validateLayoutInputs({ framework, projectName: projectId });
+        if (validation.ok) {
+          const scaffold = await layout.ensureRerunScaffold({
+            framework: validation.framework,
+            projectName: validation.projectName,
+            testName,
+          });
+          const replayPayload = {
+            executionId, projectId, framework, testName,
+            multiScenario: true,
+            totalScenarios: allScenarioResults.length,
+            passedScenarios,
+            failedScenarios,
+            success: failedScenarios === 0 && !executionState.cancelled,
+            cancelled: executionState.cancelled,
+            executedSteps: flatStepResults.length,
+            successCount, failureCount,
+            durationMs: totalDuration,
+            startedAt: new Date(startTime).toISOString(),
+            completedAt: new Date().toISOString(),
+            results: flatStepResults,
+            scenarioResults: allScenarioResults,
+            healingSummary: {
+              healingEvents:  flatStepResults.filter(s => s.healing).length,
+              healedSteps:    flatStepResults.filter(s => s.healing && s.healing.healed).length,
+              exhausted:      flatStepResults.filter(s => s.healing && s.healing.exhausted).length,
+              aiRescues:      flatStepResults.filter(s => s.rescuedBy === 'ai').length,
+              healerRescues:  flatStepResults.filter(s => s.rescuedBy === 'healer').length,
+            },
+            scrollSummary: { scrollSteps: 0, successfulScrolls: 0 },
+          };
+          await fsp.writeFile(scaffold.replayResult, JSON.stringify(replayPayload, null, 2), 'utf8');
+          await fsp.writeFile(path.join(scaffold.report, 'status.json'),
+            JSON.stringify(replayPayload, null, 2), 'utf8');
+          rerunLayout = {
+            framework: scaffold.project.framework,
+            projectName: scaffold.project.projectName,
+            testName: scaffold.testName,
+            timestamp: scaffold.timestamp,
+            rerunDir: scaffold.rerunDir,
+            report: scaffold.report,
+            replayResult: scaffold.replayResult,
+          };
+          try {
+            const { markRerunCompleted } = await import('../services/dashboardService.js');
+            markRerunCompleted({
+              executionId, framework, projectId, testName,
+              success: failedScenarios === 0 && !executionState.cancelled,
+            });
+          } catch (_) { /* best effort */ }
+        }
+      } catch (e) {
+        console.warn('[Rerun] Multi-scenario persistence failed (non-fatal):', e.message);
+      }
+    }
+
+    res.json({
+      success: failedScenarios === 0 && !executionState.cancelled,
+      cancelled: executionState.cancelled,
+      executionId,
+      multiScenario: true,
+      totalScenarios: allScenarioResults.length,
+      passedScenarios, failedScenarios,
+      executedSteps: flatStepResults.length,
+      successCount, failureCount,
+      duration: `${(totalDuration / 1000).toFixed(2)}s`,
+      scenarioResults: allScenarioResults,
+      results: flatStepResults,
+      rerunLayout,
+    });
+  } catch (error) {
+    console.error('[Rerun] Multi-scenario execution error:', error);
+    throw new Error(`Failed to execute multi-scenario rerun: ${error.message}`);
+  } finally {
+    try {
+      if (page && !page.isClosed()) await page.close();
+      if (context) await context.close();
+      if (browser) await browser.close();
+    } catch (cleanupError) {
+      console.warn('[Rerun] Cleanup error:', cleanupError.message);
+    }
+    runningReruns.delete(executionId);
+    if (mostRecentExecutionId === executionId) mostRecentExecutionId = null;
+  }
+}
+
 async function executeScenarioOutline(req, res, steps, browserType, baseUrl, headless, examples, stopOnFailure = false, projectId = null, framework = null, testName = null) {
   const executionId = `rerun_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   console.log(`[Rerun] Starting Scenario Outline execution ${executionId} with ${examples.length} examples`);
