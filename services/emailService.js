@@ -159,13 +159,48 @@ async function nodemailer() {
   return _nodemailer;
 }
 
+// [ZAC-FIX 2026-05-24] Cache an Ethereal Email test account so the same
+// preview-mode transport is reused across sends within a server lifetime.
+// Ethereal is nodemailer's official "test SMTP" — emails are CAUGHT (not
+// delivered) and shown via a public preview URL. Lets QA verify the
+// recipient parsing / subject / attachment WITHOUT setting up real SMTP.
+let _etherealAccount = null;
+async function ensureEtherealAccount() {
+  if (_etherealAccount) return _etherealAccount;
+  const nm = await nodemailer();
+  if (!nm.createTestAccount) {
+    throw Object.assign(new Error('Ethereal preview unavailable in this nodemailer version'),
+      { name: 'ConfigError' });
+  }
+  _etherealAccount = await nm.createTestAccount();
+  console.log(`${TAG} Ethereal test account created: user=${_etherealAccount.user}`);
+  console.log(`${TAG}   web inbox: ${_etherealAccount.web || 'https://ethereal.email'}`);
+  return _etherealAccount;
+}
+
 async function buildTransport() {
   const c = await readConfigInternal();
+  const nm = await nodemailer();
+
+  // ── Ethereal preview path ──
+  // Triggered when host === 'ethereal' (or ZAC_EMAIL_PROVIDER=ethereal).
+  // Captures every send and returns a previewUrl for inspection.
+  const wantsEthereal =
+    String(c.host || '').toLowerCase() === 'ethereal' ||
+    String(process.env.ZAC_EMAIL_PROVIDER || '').toLowerCase() === 'ethereal';
+  if (wantsEthereal) {
+    const acc = await ensureEtherealAccount();
+    return nm.createTransport({
+      host: acc.smtp.host, port: acc.smtp.port, secure: acc.smtp.secure,
+      auth: { user: acc.user, pass: acc.pass },
+      connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000,
+    });
+  }
+
   if (!c.host) {
     throw Object.assign(new Error('SMTP not configured. Set host/port in Settings → Email or via SMTP_* env vars.'),
       { name: 'ConfigError' });
   }
-  const nm = await nodemailer();
   const opts = {
     host: c.host,
     port: c.port,
@@ -224,8 +259,18 @@ function normaliseRecipients(input) {
 
 export async function sendMail(mail) {
   const cfg = await readConfigInternal();
-  if (!cfg.enabled) {
-    return { ok: false, error: 'Email is disabled. Enable it in Settings → Email.' };
+  // [ZAC-FIX] Ethereal preview mode is a no-config-required path so QA
+  // can verify the report-emailing pipeline today. Bypass the "enabled"
+  // guard whenever Ethereal is selected — the only "delivery" is a
+  // captured preview URL, no real outbound SMTP.
+  const isEtherealPreview =
+    String(cfg.host || '').toLowerCase() === 'ethereal' ||
+    String(process.env.ZAC_EMAIL_PROVIDER || '').toLowerCase() === 'ethereal';
+  if (!cfg.enabled && !isEtherealPreview) {
+    return {
+      ok: false,
+      error: 'Email is disabled. Enable it in Settings → Email, OR set host="ethereal" / ZAC_EMAIL_PROVIDER=ethereal for a no-config preview.',
+    };
   }
   // Multi-recipient support: any of `to`, `cc`, `bcc` may be a comma- or
   // semicolon-separated string OR an array of addresses. Empty fields
@@ -233,7 +278,17 @@ export async function sendMail(mail) {
   const to  = normaliseRecipients(mail.to)  || normaliseRecipients(cfg.to);
   const cc  = normaliseRecipients(mail.cc);
   const bcc = normaliseRecipients(mail.bcc);
-  const from = (mail.from && mail.from.trim()) || cfg.from || cfg.user;
+  // [ZAC-FIX] In Ethereal preview mode, the test-account user (which is
+  // assigned at boot) doubles as a perfectly valid from address.
+  // Without this, Ethereal sends would 400 with "No sender" even though
+  // the captured email would have been valid.
+  let from = (mail.from && mail.from.trim()) || cfg.from || cfg.user;
+  if (!from && isEtherealPreview) {
+    try {
+      const acc = await ensureEtherealAccount();
+      from = `"ZAC QA" <${acc.user}>`;
+    } catch (_) { /* fall through to error below */ }
+  }
   if (!to)   return { ok: false, error: 'No recipient. Set a default in Settings or pass `to`.' };
   if (!from) return { ok: false, error: 'No sender. Set "From" in Settings or pass `from`.' };
   try {
@@ -248,8 +303,23 @@ export async function sendMail(mail) {
       attachments: mail.attachments || [],
     });
     const recipientCount = to.split(',').length + (cc ? cc.split(',').length : 0) + (bcc ? bcc.split(',').length : 0);
-    console.log(`${TAG} sent "${mail.subject}" → ${recipientCount} recipient(s) [to=${to}${cc ? `, cc=${cc}` : ''}${bcc ? `, bcc=${bcc}` : ''}] (msgId=${info.messageId})`);
-    return { ok: true, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected, recipientCount };
+    // Ethereal returns a preview URL via nodemailer.getTestMessageUrl().
+    // This lets the user CLICK to see exactly what would have been
+    // delivered, without needing real SMTP credentials.
+    let previewUrl = null;
+    try {
+      const nm = await nodemailer();
+      if (nm.getTestMessageUrl) previewUrl = nm.getTestMessageUrl(info) || null;
+    } catch (_) { /* best-effort */ }
+    const previewSuffix = previewUrl ? `  preview: ${previewUrl}` : '';
+    console.log(`${TAG} sent "${mail.subject}" → ${recipientCount} recipient(s) [to=${to}${cc ? `, cc=${cc}` : ''}${bcc ? `, bcc=${bcc}` : ''}] (msgId=${info.messageId})${previewSuffix}`);
+    return {
+      ok: true, messageId: info.messageId,
+      accepted: info.accepted, rejected: info.rejected,
+      recipientCount,
+      previewUrl,
+      provider: previewUrl ? 'ethereal' : 'smtp',
+    };
   } catch (e) {
     console.warn(`${TAG} send failed: ${e.message}`);
     return { ok: false, error: e.message };
