@@ -200,14 +200,18 @@ export async function executePlaywrightStep(page, step, context = null) {
       await page.waitForTimeout(300);
       break;
 
-    case 'type': {
+    case 'type':
+    case 'fill': { // [ZAC-FIX] alias — Playwright API uses .fill(); QA naturally
+                   //              writes step.kind = 'fill'. Treat both identically
+                   //              so a recorded "type" and a hand-written "fill"
+                   //              produce the same Playwright behaviour.
       healInfo = await findElementWithHealing(page, step, { state: 'visible' });
       const { resolved: typedValue, wasPlaceholder } = resolveStepValue(step, 'value');
       await page.fill(healInfo.selector, '', { timeout: 10000 });
       await page.fill(healInfo.selector, typedValue || '', { timeout: 10000 });
       // Mask the resolved value in logs when it came from a credential placeholder.
       const safeForLog = wasPlaceholder ? maskSecret(typedValue) : (typedValue || '');
-      console.log(`[Step:type] ${healInfo.selector} ← ${safeForLog} (${(typedValue || '').length} chars)`);
+      console.log(`[Step:${step.kind}] ${healInfo.selector} ← ${safeForLog} (${(typedValue || '').length} chars)`);
       await page.waitForTimeout(200);
       break;
     }

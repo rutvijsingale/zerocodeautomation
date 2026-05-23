@@ -26,6 +26,8 @@ function generatePlaywrightStepCode(step) {
       lines.push(`  await page.dblclick(${JSON.stringify(step.selector)});`);
       break;
     case 'type':
+    case 'fill': // [ZAC-FIX] Playwright-native verb alias — QA writing a step
+                 //              from scratch reaches for "fill" before "type".
       lines.push(`  await page.fill(${JSON.stringify(step.selector)}, ${JSON.stringify(step.value || '')});`);
       break;
     case 'select':
@@ -173,6 +175,7 @@ function generateSeleniumStepCode(step) {
       lines.push(`    new org.openqa.selenium.interactions.Actions(driver).doubleClick(element).perform();`);
       break;
     case 'type':
+    case 'fill': // [ZAC-FIX] alias for ergonomic parity (matches Playwright's verb)
       lines.push(`    WebElement input = driver.findElement(By.cssSelector(${JSON.stringify(step.selector)}));`);
       lines.push(`    input.clear();`);
       lines.push(`    input.sendKeys(${JSON.stringify(step.value || '')});`);
