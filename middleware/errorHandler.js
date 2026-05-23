@@ -68,6 +68,29 @@ export const errorHandler = (err, req, res, next) => {
     return res.status(statusCode).json(response);
   }
 
+  // [ZAC-FIX] Express body-parser raises distinct errors for malformed
+  // JSON, oversized payloads, and unsupported content-types. Without this
+  // branch they fall through to the generic 500 path, which reads as a
+  // server bug to the client even though the input was at fault.
+  if (err.type === 'entity.parse.failed' || err instanceof SyntaxError && /JSON/.test(err.message)) {
+    const { response, statusCode } = createErrorResponse(
+      new Error('Malformed JSON body: ' + (err.message || 'parse error')),
+      400
+    );
+    return res.status(statusCode).json(response);
+  }
+  if (err.type === 'entity.too.large' || err.code === 'LIMIT_FILE_SIZE') {
+    const { response, statusCode } = createErrorResponse(
+      new Error('Request body too large (limit ' + (err.limit ? Math.round(err.limit / 1024) + ' KB' : '10 MB') + ')'),
+      413
+    );
+    return res.status(statusCode).json(response);
+  }
+  if (err.type === 'charset.unsupported' || err.type === 'encoding.unsupported' || err.type === 'parameters.too.many') {
+    const { response, statusCode } = createErrorResponse(err, 400);
+    return res.status(statusCode).json(response);
+  }
+
   // Default error response
   const { response, statusCode } = createErrorResponse(err, 500, process.env.NODE_ENV === 'development');
   res.status(statusCode).json(response);

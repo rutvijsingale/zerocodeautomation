@@ -53,11 +53,21 @@ export const createRateLimiter = (windowMs = 15 * 60 * 1000, max = 100) => {
   });
 };
 
-// Strict rate limiting for sensitive endpoints
-export const strictRateLimiter = createRateLimiter(5 * 60 * 1000, 10); // 10 requests per 5 minutes
+// [ZAC-FIX] Strict rate limiting for genuinely sensitive endpoints —
+// recording/start, export, generate-files, files/* — i.e. the ones that
+// kick off a Playwright session, write whole project archives, or shell
+// out to mvn/npm. The original 10/5min cap also covered cheap ops like
+// /projects/:id/save and /manual-edits which are autosave-driven (the
+// recording UI fires manual-edits every 1.5s while QA is typing). Those
+// have been moved to generalRateLimiter; remaining strict endpoints get
+// a slightly more generous 30/5min so a normal back-to-back recording +
+// generate cycle never hits 429.
+export const strictRateLimiter = createRateLimiter(5 * 60 * 1000, 30); // 30 requests per 5 minutes
 
-// General rate limiting
-export const generalRateLimiter = createRateLimiter(15 * 60 * 1000, 100); // 100 requests per 15 minutes
+// General rate limiting — autosave-driven save / manual-edits / append-steps
+// route through here. 200/15min ≈ 13/min sustained, plenty for a single
+// user typing in the recording UI without hammering CI.
+export const generalRateLimiter = createRateLimiter(15 * 60 * 1000, 200); // 200 requests per 15 minutes
 
 // [ZAC-FIX] Lenient rate limiting for polling endpoints. The dashboard
 // has multiple ~4s pollers running in parallel (framework projection,

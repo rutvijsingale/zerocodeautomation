@@ -3332,7 +3332,7 @@ router.post('/projects/select', generalRateLimiter, asyncHandler(async (req, res
 }));
 
 // Save project data
-router.post('/projects/:projectId/save', strictRateLimiter, asyncHandler(async (req, res) => {
+router.post('/projects/:projectId/save', generalRateLimiter, asyncHandler(async (req, res) => {
   let projectId;
   try {
     projectId = validateAndDecodeProjectId(req.params.projectId);
@@ -3380,7 +3380,7 @@ router.post('/projects/:projectId/save', strictRateLimiter, asyncHandler(async (
 //
 // Always returns 200 with { ok, written:[paths], stored:bool } so the UI
 // can show a "Saved ✓" pill without dealing with HTTP-level error states.
-router.post('/projects/:projectId/manual-edits', strictRateLimiter, asyncHandler(async (req, res) => {
+router.post('/projects/:projectId/manual-edits', generalRateLimiter, asyncHandler(async (req, res) => {
   let projectId;
   try { projectId = validateAndDecodeProjectId(req.params.projectId); }
   catch (e) { return res.status(400).json({ ok: false, error: e.message }); }
@@ -3542,7 +3542,7 @@ function inferTestRunner(framework) {
 }
 
 // Optimized endpoint to append steps to a project without loading all existing steps
-router.post('/projects/:projectId/append-steps', strictRateLimiter, asyncHandler(async (req, res) => {
+router.post('/projects/:projectId/append-steps', generalRateLimiter, asyncHandler(async (req, res) => {
   let projectId;
   try {
     projectId = validateAndDecodeProjectId(req.params.projectId);
