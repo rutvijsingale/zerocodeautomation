@@ -267,6 +267,38 @@
     }
   });
 
+  // ── Capture defaults (failure screenshot + video) ──────────────
+  // [ZAC-FIX 2026-05-24] Persist per-browser via ZacSettings so the
+  // Recording tab can read these as defaults when firing a rerun.
+  // Defaults: failure screenshot ON (everyone wants it), video OFF
+  // (expensive — opt-in).
+  function syncCaptureUI() {
+    const sf = document.getElementById('captureFailureScreenshot');
+    const cv = document.getElementById('captureVideo');
+    if (!sf || !cv) return;
+    const s = (window.ZacSettings && window.ZacSettings.get()) || {};
+    sf.checked = (s.captureFailureScreenshot !== false); // default true
+    cv.checked = !!s.captureVideo;                       // default false
+    const status = document.getElementById('captureStatus');
+    if (status) {
+      status.className = 'status ok';
+      status.textContent = 'screenshots: ' + (sf.checked ? 'on' : 'off')
+        + ' · video: ' + (cv.checked ? 'on' : 'off');
+    }
+  }
+  function bindCaptureToggle(domId, settingKey) {
+    const el = document.getElementById(domId);
+    if (!el || !window.ZacSettings) return;
+    el.addEventListener('change', () => {
+      window.ZacSettings.set({ [settingKey]: !!el.checked });
+      syncCaptureUI();
+      showToast(settingKey + ' = ' + (el.checked ? 'on' : 'off'), 'info');
+    });
+  }
+  bindCaptureToggle('captureFailureScreenshot', 'captureFailureScreenshot');
+  bindCaptureToggle('captureVideo',             'captureVideo');
+  syncCaptureUI();
+
   // ── Boot ───────────────────────────────────────────────────────
   syncAiState();
   loadFrameworks();

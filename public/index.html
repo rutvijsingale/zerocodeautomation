@@ -445,8 +445,18 @@
             <input type="checkbox" id="stopOnFailure" style="width: 16px; height: 16px; cursor: pointer; accent-color: #f59e0b;">
             <span>🛑 Stop on First Failure</span>
           </label>
+          <!-- [ZAC-FIX 2026-05-24] Per-rerun overrides for Settings → 📸 Capture defaults.
+               Default state mirrors the global setting; tick to override for THIS rerun only. -->
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text); font-size: 13px;" title="When checked, the rerun engine takes a PNG of the page after every failing step and persists it under <rerunDir>/screenshots/. Recommended: ON.">
+            <input type="checkbox" id="captureFailureScreenshotOverride" checked style="width: 16px; height: 16px; cursor: pointer; accent-color: #10b981;">
+            <span>📸 Failure screenshot</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text); font-size: 13px;" title="When checked, the rerun's BrowserContext records video to <rerunDir>/videos/. Off by default — videos make reruns ~2× slower and consume disk.">
+            <input type="checkbox" id="captureVideoOverride" style="width: 16px; height: 16px; cursor: pointer; accent-color: #6366f1;">
+            <span>🎥 Record video</span>
+          </label>
           <small style="color: var(--muted); font-size: 11px; margin-left: 8px;">
-            When enabled, execution will stop immediately when a step fails. When disabled, execution continues through all steps.
+            Stop on First Failure halts at the first failed step. Failure screenshot and video defaults are configurable in Settings → 📸 Capture defaults.
           </small>
         </div>
         <div id="rerunStatus" style="display: none; margin-top: 8px; padding: 12px; background: rgba(15, 21, 34, 0.6); border-radius: 6px; border: 1px solid var(--border);">

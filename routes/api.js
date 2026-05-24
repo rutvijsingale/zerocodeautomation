@@ -799,6 +799,17 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
     //                        step.assertMode wins when set.
     stepTimeoutMs = 30000,
     defaultAssertMode = 'hard',
+    // [ZAC-FIX 2026-05-24] Capture knobs — defaults match the
+    // Settings → 📸 Capture defaults panel.
+    //   captureFailureScreenshot: when true (default), the engine
+    //     calls page.screenshot() after every failed step and
+    //     persists the PNG under <rerunDir>/screenshots/. When false,
+    //     the screenshot capture is skipped (faster reruns, no PNG).
+    //   captureVideo: when true, the BrowserContext is created with
+    //     recordVideo pointed at <rerunDir>/videos/. Off by default
+    //     because video makes reruns ~2× slower.
+    captureFailureScreenshot = true,
+    captureVideo = false,
     // [ZAC-FIX 2026-05-24] Multi-scenario rerun. When provided, the
     // route iterates over each scenario.steps[] sequentially within
     // ONE browser session and reports per-scenario results. Lets QA
@@ -982,10 +993,16 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
     };
     let harPath = null;
     if (preResolvedScaffold) {
-      ctxOptions.recordVideo = {
-        dir: preResolvedScaffold.videos,
-        size: { width: Math.min(1280, screenSize.width), height: Math.min(720, screenSize.height) },
-      };
+      // [ZAC-FIX 2026-05-24] recordVideo only when the user opts in
+      // via Settings → 📸 Capture defaults (or per-rerun override).
+      // Off by default — video makes reruns ~2× slower and consumes
+      // significant disk space.
+      if (captureVideo) {
+        ctxOptions.recordVideo = {
+          dir: preResolvedScaffold.videos,
+          size: { width: Math.min(1280, screenSize.width), height: Math.min(720, screenSize.height) },
+        };
+      }
       harPath = path.join(preResolvedScaffold.logs, 'network.har');
       ctxOptions.recordHar = { path: harPath, mode: 'minimal' };
     }
@@ -1226,7 +1243,8 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
         // write to disk later inside the layout-persistence block (the
         // rerun scaffold dir isn't resolved until then). Pass buffer +
         // suggested filename via the result object.
-        if (stepResult.success === false && page) {
+        // [ZAC-FIX 2026-05-24] Skip when captureFailureScreenshot=false.
+        if (stepResult.success === false && page && captureFailureScreenshot) {
           try {
             const buf = await page.screenshot({ fullPage: false, timeout: 3000 });
             stepResult.screenshot = `step-${i + 1}-failed.png`;
@@ -1275,8 +1293,9 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
           timedOut: isTimeout,
           timeoutMs: isTimeout ? stepError.zacTimeoutMs : undefined,
         };
-        // T2.7 — auto-screenshot on the throw path too.
-        if (page) {
+        // T2.7 — auto-screenshot on the throw path too. Honours the
+        // per-rerun captureFailureScreenshot knob (Settings → 📸).
+        if (page && captureFailureScreenshot) {
           try {
             const buf = await page.screenshot({ fullPage: false, timeout: 3000 });
             failedRow.screenshot = `step-${i + 1}-failed.png`;
@@ -1334,10 +1353,17 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
           projectName: projectId,
         });
         if (validation.ok) {
+          // [ZAC-FIX 2026-05-24] When we pre-resolved a scaffold (so
+          // Playwright could write video + HAR), reuse its timestamp.
+          // Without this, a NEW timestamp dir was created here for
+          // replay-result.json + report/, leaving the video stranded
+          // in the OLD timestamp dir — splitting one rerun into two
+          // sibling folders.
           const scaffold = await layout.ensureRerunScaffold({
             framework: validation.framework,
             projectName: validation.projectName,
             testName: rerunTestName,
+            timestamp: preResolvedScaffold ? preResolvedScaffold.timestamp : undefined,
           });
           const fsp = await import('fs/promises');
           const statusPayload = {

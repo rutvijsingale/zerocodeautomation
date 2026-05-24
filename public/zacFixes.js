@@ -397,6 +397,39 @@
     console.log('[ZAC-FIX] FIX 6 (rev2): filters wired into dashboard.js #filterFramework, runner select, real-data CSV');
   }
 
+  /* ─────────────── Recording-tab capture overrides ─────────────── */
+  // [ZAC-FIX 2026-05-24] Sync the per-rerun override checkboxes
+  // (#captureFailureScreenshotOverride / #captureVideoOverride) with
+  // the global ZacSettings defaults whenever those change. Default
+  // state on first load mirrors Settings → 📸 Capture defaults so a
+  // fresh page already shows the user's preference, not a hard-coded
+  // checked state.
+  function installCaptureOverrideSync() {
+    const shot = document.getElementById('captureFailureScreenshotOverride');
+    const vid  = document.getElementById('captureVideoOverride');
+    if (!shot && !vid) return;
+    if (!ZAC) return;
+    const apply = () => {
+      const s = ZAC.get();
+      // Don't overwrite if user already manually clicked (track via dataset).
+      if (shot && !shot.dataset.userTouched) shot.checked = (s.captureFailureScreenshot !== false);
+      if (vid  && !vid.dataset.userTouched)  vid.checked  = !!s.captureVideo;
+    };
+    apply();
+    if (shot) shot.addEventListener('click', () => { shot.dataset.userTouched = '1'; });
+    if (vid)  vid.addEventListener('click',  () => { vid.dataset.userTouched  = '1'; });
+    ZAC.subscribe((_, change) => {
+      if (!change) return;
+      if (change.captureFailureScreenshot && shot && !shot.dataset.userTouched) {
+        shot.checked = !!change.captureFailureScreenshot.to;
+      }
+      if (change.captureVideo && vid && !vid.dataset.userTouched) {
+        vid.checked = !!change.captureVideo.to;
+      }
+    });
+    console.log('[ZAC-FIX] capture-override sync installed');
+  }
+
   /* ─────────────── Settings: Ollama wiring ─────────────── */
   // [ZAC-FIX] FIX 2 + FIX 8 — unify the two AI on/off toggles. Treat the
   // ZAC server (/api/ai/info, /api/ai/toggle) as the single source of
@@ -1306,6 +1339,7 @@
     try { installClearLocatorsButton(); }  catch (e) { console.error('[ZAC-FIX] clear-locators failed', e); }
     try { installOrphanToggle(); }         catch (e) { console.error('[ZAC-FIX] orphan toggle failed', e); }
     try { installFrameworkProjection(); }  catch (e) { console.error('[ZAC-FIX] framework projection failed', e); }
+    try { installCaptureOverrideSync(); }  catch (e) { console.error('[ZAC-FIX] capture override sync failed', e); }
     console.log('[ZAC-FIX] zacFixes.js ready (FIX 1, 5, 6, A, B, C, D, F.1, clear-locators + settings AI wiring).');
   }
   boot();

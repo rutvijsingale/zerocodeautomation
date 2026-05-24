@@ -51,6 +51,12 @@
     ollamaEndpoint: 'http://localhost:11434',
     ollamaModel: 'mistral',
     ollamaEnabled: false,
+    // [ZAC-FIX 2026-05-24] Capture defaults — Settings → 📸 Capture defaults.
+    // The Recording tab reads these when firing a rerun; per-rerun
+    // overrides are applied via the rerun-options panel near the
+    // rerun button.
+    captureFailureScreenshot: true,   // recommended ON
+    captureVideo: false,              // opt-in (slow, heavy)
   });
 
   function read() {

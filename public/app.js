@@ -5319,6 +5319,20 @@ document.addEventListener('DOMContentLoaded', () => {
           .replace(/^-+|-+$/g, '')
           .slice(0, 60) || 'rerun';
 
+        // [ZAC-FIX 2026-05-24] Read capture defaults from Settings.
+        // Allow per-rerun overrides via #captureFailureScreenshotOverride
+        // / #captureVideoOverride if the user has the recording tab's
+        // override checkboxes ticked. Defaults: screenshot ON, video OFF.
+        const _zs = (window.ZacSettings && window.ZacSettings.get()) || {};
+        const overrideShot = document.getElementById('captureFailureScreenshotOverride');
+        const overrideVid  = document.getElementById('captureVideoOverride');
+        const captureFailureScreenshot = overrideShot
+          ? !!overrideShot.checked
+          : (_zs.captureFailureScreenshot !== false);
+        const captureVideo = overrideVid
+          ? !!overrideVid.checked
+          : !!_zs.captureVideo;
+
         const payload = {
           steps: state.steps,
           browserType: document.getElementById('browserType')?.value || 'chromium',
@@ -5331,6 +5345,9 @@ document.addEventListener('DOMContentLoaded', () => {
           projectId: state.currentProjectId || undefined,
           framework: rerunFramework,
           testName: rerunTestName,
+          // Capture-config (server reads these, falls back to ON/OFF defaults)
+          captureFailureScreenshot,
+          captureVideo,
         };
 
         const resp = await fetch('/api/rerun', {

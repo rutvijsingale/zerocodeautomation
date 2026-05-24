@@ -356,6 +356,45 @@ ollama pull mistral</code>
   <div class="status" id="frameworkStatus"></div>
 </div>
 
+<!-- ────────── Recording / Rerun capture ────────── -->
+<!-- [ZAC-FIX 2026-05-24] Make the failure-screenshot + video capture
+     defaults user-toggleable. Saved to ZacSettings under
+     `captureFailureScreenshot` (default true) and `captureVideo`
+     (default false). The Recording-tab rerun button reads them, and
+     /api/rerun honours them per request. -->
+<div class="panel">
+  <h2>📸 Capture defaults</h2>
+  <p class="desc">
+    Controls whether failure screenshots and full-run videos are captured during
+    reruns. Settings persist per browser (localStorage). Each rerun can still
+    override these with the toggles in the Recording panel.
+  </p>
+  <div class="row">
+    <div class="info">
+      <div class="label">Capture failure screenshots</div>
+      <div class="hint">When a step fails the rerun engine takes a PNG and saves it
+        to <code>&lt;rerunDir&gt;/screenshots/step-N-failed.png</code>. Generated
+        framework hooks (Cucumber / TestNG @After) attach the same to Allure /
+        HTML reports. Recommended: ON.</div>
+    </div>
+    <div class="control">
+      <label class="switch" for="captureFailureScreenshot"><input type="checkbox" id="captureFailureScreenshot" checked /><span class="slider"></span></label>
+    </div>
+  </div>
+  <div class="row">
+    <div class="info">
+      <div class="label">Record video on rerun</div>
+      <div class="hint">Adds <code>recordVideo</code> to the rerun's Playwright context.
+        Each scenario is saved as a <code>.webm</code> under <code>videos/</code>.
+        Off by default — videos make reruns ~2× slower and consume disk space.</div>
+    </div>
+    <div class="control">
+      <label class="switch" for="captureVideo"><input type="checkbox" id="captureVideo" /><span class="slider"></span></label>
+    </div>
+  </div>
+  <div class="status" id="captureStatus"></div>
+</div>
+
 <!-- ────────── Server info ────────── -->
 <div class="panel">
   <h2>🖥 Server</h2>
