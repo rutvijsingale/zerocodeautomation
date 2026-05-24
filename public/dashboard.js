@@ -774,7 +774,16 @@
   }
 
   function load() {
-    fetch('/api/dashboard/stats').then((r) => r.json()).then((stats) => {
+    // [ZAC-FIX 2026-05-24] Honor the orphan toggle — when the user
+    // ticks "Include orphan projects", `window.zacIncludeOrphans`
+    // is set to true and we must pass `existingOnly=false` to the
+    // stats endpoint. Without this the table kept showing "0 rows"
+    // because the server filters out reruns whose project no
+    // longer exists in projects/, regardless of what the toggle
+    // says. Default = filter on (current behaviour).
+    const includeOrphans = !!window.zacIncludeOrphans;
+    const url = '/api/dashboard/stats' + (includeOrphans ? '?existingOnly=false' : '');
+    fetch(url).then((r) => r.json()).then((stats) => {
       lastStats = stats;
       const sel = document.getElementById('filterFramework');
       const cur = sel.value;
@@ -1154,3 +1163,11 @@
   setInterval(load, 30_000);
   setInterval(pollLive, 2_000);
   setInterval(refreshAiStatus, 15_000);
+
+  // [ZAC-FIX 2026-05-24] When zacFixes.js fires the orphan-toggle
+  // change event, immediately reload stats with the new filter so
+  // the user sees orphan reruns appear/disappear without waiting
+  // for the 30s tick. Also expose `load` on window so the toggle's
+  // existing best-effort `window.load?.()` actually works.
+  try { if (typeof window !== 'undefined') window.load = load; } catch (_) {}
+  window.addEventListener('zac-runs:changed', () => load());

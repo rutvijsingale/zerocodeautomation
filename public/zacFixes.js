@@ -1012,6 +1012,18 @@
     window.zacIncludeOrphans = cb.checked;
 
     function tickCount() {
+      // [ZAC-FIX 2026-05-24] If the toggle is ON (showing orphans),
+      // there is nothing hidden — clear the counter immediately
+      // and skip the banner. Previously the counter kept its stale
+      // "(11 hidden runs)" text even after the user opted IN to
+      // show them, which was confusing.
+      if (cb.checked) {
+        if (counter) counter.textContent = '';
+        if (label)   label.title = 'Showing all projects (orphans included).';
+        const banner0 = document.getElementById('zac-hidden-runs-banner');
+        if (banner0) banner0.remove();
+        return;
+      }
       // Pull a quick count of how many projects are hidden right now —
       // makes the toggle informative even when off. Surfaces BOTH the
       // project count AND the rerun count, because the more important
@@ -1034,10 +1046,9 @@
         //   - hidden runs > 0 (there's actually something to surface)
         //   - the visible reruns list is empty (otherwise the user has
         //     plenty to see and a banner would be noise).
-        const filterOn = !cb.checked;
         const visibleReruns = d?.summary?.totalReruns || 0;
         let banner = document.getElementById('zac-hidden-runs-banner');
-        if (filterOn && hiddenReruns > 0 && visibleReruns === 0) {
+        if (hiddenReruns > 0 && visibleReruns === 0) {
           if (!banner) {
             banner = document.createElement('div');
             banner.id = 'zac-hidden-runs-banner';
