@@ -354,7 +354,21 @@ public class SeleniumWorld {
     }
 
     @After
-    public void cleanup() {
+    public void cleanup(io.cucumber.java.Scenario scenario) {
+        // [ZAC-FIX 2026-05-24] Capture screenshot on failure.
+        // Attaches a PNG to the failed Cucumber scenario so Allure
+        // and the Cucumber HTML reporter render it inline — saves
+        // a QA from grepping target/ for a stack trace. Best-effort:
+        // a screenshot capture failure must not break teardown.
+        if (scenario != null && scenario.isFailed() && driver != null) {
+            try {
+                byte[] screenshot = ((org.openqa.selenium.TakesScreenshot) driver)
+                    .getScreenshotAs(org.openqa.selenium.OutputType.BYTES);
+                scenario.attach(screenshot, "image/png", "Screenshot on Failure");
+            } catch (Exception e) {
+                System.err.println("[ZAC] Failure-screenshot capture failed: " + e.getMessage());
+            }
+        }
         if (driver != null) {
             driver.quit();
         }

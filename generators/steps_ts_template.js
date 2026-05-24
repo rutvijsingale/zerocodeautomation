@@ -519,8 +519,10 @@ And('I close the browser', async function(this: PlaywrightWorld) {
  * @returns {string} Generated World class code
  */
 export function generateWorldFile() {
-  return `import { setWorldConstructor, World } from '@cucumber/cucumber';
+  return `import { setWorldConstructor, World, After, Status } from '@cucumber/cucumber';
 import { chromium, firefox, webkit, Browser, BrowserContext, Page } from '@playwright/test';
+import * as fs from 'fs';
+import * as path from 'path';
 
 function resolveBrowserType() {
   const t = (process.env.ZAC_BROWSER || 'chromium').toLowerCase();
@@ -568,7 +570,30 @@ export class PlaywrightWorld extends World {
   }
 }
 
-setWorldConstructor(PlaywrightWorld);`;
+setWorldConstructor(PlaywrightWorld);
+
+// [ZAC-FIX 2026-05-24] Capture a failure screenshot on every Cucumber
+// scenario that ends in FAILED. The PNG is BOTH attached to the
+// scenario (so cucumber-html-reporter / Allure inline it) AND written
+// to test-results/screenshots/ on disk so QA can grep for it later.
+// Best-effort: a screenshot failure must not break teardown.
+After(async function (this: PlaywrightWorld, scenario) {
+  if (scenario.result?.status === Status.FAILED && this.page) {
+    try {
+      const png = await this.page.screenshot();
+      this.attach(png, 'image/png');
+      const dir = path.resolve('test-results', 'screenshots');
+      fs.mkdirSync(dir, { recursive: true });
+      const safe = (scenario.pickle?.name || 'scenario').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60);
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const out = path.join(dir, \`failure-\${safe}-\${ts}.png\`);
+      fs.writeFileSync(out, png);
+      console.log('[ZAC] Failure screenshot saved:', out);
+    } catch (e: any) {
+      console.error('[ZAC] Failure-screenshot capture failed:', e?.message || e);
+    }
+  }
+});`;
 }
 
 /**

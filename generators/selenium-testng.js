@@ -376,9 +376,30 @@ function testClassJava({ className, baseUrl, steps }) {
   lines.push('    page = new BasePage(driver);');
   lines.push('  }');
   lines.push('');
+  // [ZAC-FIX 2026-05-24] Failure screenshot — required for parity
+  // with the other 3 frameworks. TestNG passes ITestResult into
+  // @AfterMethod; status==FAILURE means a @Test threw or an assert
+  // tripped. Save the PNG into target/screenshots/<test>-<ts>.png so
+  // it survives the next run and is easy to attach in Allure.
   lines.push('  @AfterMethod');
-  lines.push('  public void tearDown() {');
-  lines.push('    if (driver != null) driver.quit();');
+  lines.push('  public void tearDown(org.testng.ITestResult result) {');
+  lines.push('    try {');
+  lines.push('      if (result != null && result.getStatus() == org.testng.ITestResult.FAILURE && driver != null) {');
+  lines.push('        byte[] png = ((org.openqa.selenium.TakesScreenshot) driver)');
+  lines.push('            .getScreenshotAs(org.openqa.selenium.OutputType.BYTES);');
+  lines.push('        java.nio.file.Path dir = java.nio.file.Paths.get("target", "screenshots");');
+  lines.push('        java.nio.file.Files.createDirectories(dir);');
+  lines.push('        String safe = result.getName().replaceAll("[^A-Za-z0-9._-]+", "_");');
+  lines.push('        String ts = String.valueOf(System.currentTimeMillis());');
+  lines.push('        java.nio.file.Path out = dir.resolve("failure-" + safe + "-" + ts + ".png");');
+  lines.push('        java.nio.file.Files.write(out, png);');
+  lines.push('        System.err.println("[ZAC] Failure screenshot saved: " + out.toAbsolutePath());');
+  lines.push('      }');
+  lines.push('    } catch (Exception e) {');
+  lines.push('      System.err.println("[ZAC] Failure-screenshot capture failed: " + e.getMessage());');
+  lines.push('    } finally {');
+  lines.push('      if (driver != null) driver.quit();');
+  lines.push('    }');
   lines.push('  }');
   lines.push('');
   lines.push(`  @Test(description = "Recorded flow → ${escapeJavaString(className)}")`);

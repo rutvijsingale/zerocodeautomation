@@ -123,6 +123,24 @@
           detail.style.borderLeftColor = 'var(--red)';
           detail.style.background = 'rgba(248,113,113,0.05)';
           detail.appendChild(el('div', {}, '✖ ' + r.error));
+          // [ZAC-FIX 2026-05-24] Inline the failure screenshot when
+          // the rerun engine captured one. Massively shortens the
+          // root-cause loop — instead of "go find the file in the
+          // screenshots/ dir", the user sees the exact viewport at
+          // failure right next to the error.
+          if (r.screenshot) {
+            const url = `/reports/${path}/screenshots/${encodeURIComponent(r.screenshot)}`;
+            const a = el('a', { href: url, target: '_blank', rel: 'noopener',
+              style: 'display:inline-block;margin-top:8px;' });
+            a.appendChild(el('img', {
+              src: url, alt: 'failure screenshot',
+              style: 'max-width:480px;max-height:300px;border:1px solid var(--red);border-radius:6px;display:block;',
+            }));
+            a.appendChild(el('div', {
+              style: 'font-size:11px;color:var(--muted);margin-top:4px;font-family:monospace;',
+            }, '📸 ' + r.screenshot + ' — click to enlarge'));
+            detail.appendChild(a);
+          }
           host.appendChild(detail);
         }
       });
