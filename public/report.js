@@ -205,11 +205,27 @@
       }
 
       // Inline gallery: render screenshots + videos directly so users
-      // don't need to open them one-by-one.
+      // don't need to open them one-by-one. Empty-state messages
+      // explain WHY a section may be empty so the user doesn't think
+      // the report is broken (most happy-path reruns don't capture
+      // any of these — they only fire on explicit step kinds or
+      // failures).
+      const emptyHint = (kind) => ({
+        screenshots:
+          'No screenshots in this rerun. They\'re only captured when a step has ' +
+          'kind:"screenshot" or when a step fails. ' +
+          'To capture during recording: right-click → "Save screenshot here", ' +
+          'or add a screenshot step in the Step Builder.',
+        videos:
+          'No videos in this rerun. Videos are off by default — enable them ' +
+          'via the Recording tab\'s "Capture video" toggle, or set ' +
+          'ZAC_RECORD_VIDEO=true at server start.',
+      }[kind] || ('No ' + kind + ' captured.'));
+
       const sHost = document.getElementById('screenshotsHost');
       sHost.innerHTML = '';
       if (data.screenshots.length === 0) {
-        sHost.appendChild(el('div', { class: 'empty' }, 'no screenshots captured for this rerun'));
+        sHost.appendChild(el('div', { class: 'empty', style: 'padding:14px;line-height:1.5;' }, emptyHint('screenshots')));
       } else {
         for (const f of data.screenshots) {
           const fig = el('figure', { style: 'margin:8px 12px 8px 0;display:inline-block;vertical-align:top;' });
@@ -225,7 +241,7 @@
       const vHost = document.getElementById('videosHost');
       vHost.innerHTML = '';
       if (data.videos.length === 0) {
-        vHost.appendChild(el('div', { class: 'empty' }, 'no videos captured for this rerun'));
+        vHost.appendChild(el('div', { class: 'empty', style: 'padding:14px;line-height:1.5;' }, emptyHint('videos')));
       } else {
         for (const f of data.videos) {
           const fig = el('figure', { style: 'margin:8px 12px 8px 0;display:inline-block;vertical-align:top;' });

@@ -339,9 +339,24 @@ export async function executePlaywrightStep(page, step, context = null) {
       // file extension; a bare filename like "shot" 500s the rerun
       // with "unsupported mime type 'null'". Always normalise to .png
       // unless the caller explicitly asked for .jpg/.jpeg.
+      //
+      // Also: when invoked inside a rerun, route the file to the
+      // rerun's <ts>/screenshots/ directory (passed in via
+      // context.screenshotsDir). Without this, screenshots ended up
+      // in the server's CWD, the report viewer's gallery showed
+      // "0 screenshots", and users wondered where they went.
       let filename = step.filename || 'screenshot.png';
       if (!/\.(png|jpe?g)$/i.test(filename)) filename = `${filename}.png`;
-      await page.screenshot({ path: filename });
+      let outPath = filename;
+      try {
+        if (context && context.screenshotsDir && !filename.includes('/') && !filename.includes('\\')) {
+          const path = (await import('path')).default;
+          const fsp = (await import('fs/promises'));
+          await fsp.mkdir(context.screenshotsDir, { recursive: true });
+          outPath = path.join(context.screenshotsDir, filename);
+        }
+      } catch (_) { /* fall back to bare filename */ }
+      await page.screenshot({ path: outPath });
       break;
     }
 

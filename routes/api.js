@@ -991,6 +991,13 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
     }
     context = await browser.newContext(ctxOptions);
     executionState.context = context;
+    // [ZAC-FIX 2026-05-24] Attach the rerun's screenshots directory to
+    // the Playwright BrowserContext so the 'screenshot' step handler in
+    // utils/stepHandlers.js routes captures into <rerunDir>/screenshots/
+    // instead of the server CWD. Without this, screenshot files were
+    // written to /Users/.../zerocodeautomation/<filename>.png and the
+    // dashboard report's gallery showed an empty list.
+    if (preResolvedScaffold) context.screenshotsDir = preResolvedScaffold.screenshots;
 
     page = await context.newPage();
     executionState.page = page;
