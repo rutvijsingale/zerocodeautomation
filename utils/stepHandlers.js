@@ -416,6 +416,80 @@ export async function executePlaywrightStep(page, step, context = null) {
       }
       break;
 
+    // [ZAC-FIX 2026-05-24] DB / API validation step.
+    // ZAC doesn't ship a SQL connector — the QA-tool design is that DB state
+    // is exposed through a backend API endpoint, and the test asserts on
+    // that response. Aliases: 'dbValidate', 'db', 'apiAssert', 'apiCall'.
+    //
+    // Step shape:
+    //   {
+    //     kind: 'dbValidate',
+    //     url: 'https://api.example.com/users/42',   // or `endpoint`
+    //     method: 'GET',                              // optional; default GET
+    //     headers: { 'X-Auth': '...' },               // optional
+    //     body: { ... } | string,                     // optional, for POST/PUT
+    //     expectedStatus: 200,                        // optional; default 200
+    //     expectedJsonPath: 'data.user.id',           // optional, dot path
+    //     expectedValue: 42,                          // optional; pairs w/ jsonPath
+    //     expectedRowCount: 5,                        // optional; pairs w/ jsonPath -> array
+    //     timeoutMs: 10000                            // optional
+    //   }
+    case 'dbValidate':
+    case 'db':
+    case 'apiAssert':
+    case 'apiCall': {
+      const url = step.url || step.endpoint;
+      if (!url) throw new Error('dbValidate step requires a url/endpoint');
+      const method = (step.method || 'GET').toUpperCase();
+      const expectedStatus = Number.isFinite(step.expectedStatus) ? step.expectedStatus : 200;
+      const requestOpts = {
+        method,
+        headers: step.headers || {},
+        timeout: step.timeoutMs || 10000,
+      };
+      if (step.body !== undefined && step.body !== null && method !== 'GET' && method !== 'HEAD') {
+        requestOpts.data = typeof step.body === 'string' ? step.body : JSON.stringify(step.body);
+        if (!requestOpts.headers['Content-Type'] && typeof step.body !== 'string') {
+          requestOpts.headers['Content-Type'] = 'application/json';
+        }
+      }
+      const apiCtx = page ? page.request : null;
+      if (!apiCtx) throw new Error('dbValidate step requires a Playwright page (no API context)');
+      const resp = await apiCtx.fetch(url, requestOpts);
+      const status = resp.status();
+      if (status !== expectedStatus) {
+        throw new Error(`dbValidate ${method} ${url} → status ${status}, expected ${expectedStatus}`);
+      }
+      // Optional payload assertions
+      if (step.expectedJsonPath) {
+        const json = await resp.json().catch(() => null);
+        if (!json) throw new Error(`dbValidate ${url} → response was not valid JSON`);
+        const dotPath = String(step.expectedJsonPath).split('.').filter(Boolean);
+        let cursor = json;
+        for (const seg of dotPath) {
+          const idx = /^\d+$/.test(seg) ? Number(seg) : seg;
+          cursor = cursor != null ? cursor[idx] : undefined;
+        }
+        if ('expectedRowCount' in step) {
+          const expected = step.expectedRowCount;
+          const actual = Array.isArray(cursor) ? cursor.length : -1;
+          if (actual !== expected) {
+            throw new Error(`dbValidate ${url} jsonPath=${step.expectedJsonPath} expected ${expected} rows, got ${actual}`);
+          }
+        }
+        if ('expectedValue' in step) {
+          // Loose-eq comparison (numbers vs strings) since JSON sometimes
+          // round-trips numbers as strings on the wire.
+          // eslint-disable-next-line eqeqeq
+          if (cursor != step.expectedValue) {
+            throw new Error(`dbValidate ${url} jsonPath=${step.expectedJsonPath} expected ${JSON.stringify(step.expectedValue)}, got ${JSON.stringify(cursor)}`);
+          }
+        }
+      }
+      // No-op for the page; signals success via not throwing.
+      break;
+    }
+
     default:
       throw new Error(`Unknown step kind: ${step.kind}`);
   }
