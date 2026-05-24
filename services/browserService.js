@@ -2629,12 +2629,68 @@ export class BrowserService {
         }
         // Wire on page load + every click (cheap idempotent re-scan
         // via the .__zacFrameWired marker).
+        // [ZAC-FIX 2026-05-24] Earlier version only re-scanned on
+        // PARENT clicks, but clicks inside iframes do not bubble to the
+        // parent document. On pages like demoqa.com/frames a user could
+        // start interacting with an iframe before clicking anywhere on
+        // the parent, and the iframe listener was never attached - the
+        // session ended with 0 captured actions. Fixes:
+        //   1. Per-iframe load listener - fires when the iframe document
+        //      is fully ready (covers iframes loaded after DOMContentLoaded).
+        //   2. MutationObserver on the parent doc - picks up iframes
+        //      added later (modals, ad slots, lazy-loaded panels).
+        //   3. Periodic re-scan (1s) as a final belt-and-suspenders.
+        //      The __zacFrameWired marker makes every variant idempotent
+        //      so repeated calls cost ~nothing.
         if (document.readyState === 'loading') {
           document.addEventListener('DOMContentLoaded', __zacAttachFrameRecorders);
         } else {
           __zacAttachFrameRecorders();
         }
         document.addEventListener('click', __zacAttachFrameRecorders, true);
+        try {
+          const __zacIframeObserver = new MutationObserver(function (records) {
+            for (const r of records) {
+              for (const n of (r.addedNodes || [])) {
+                if (n && (n.tagName === 'IFRAME' || n.tagName === 'FRAME')) {
+                  // Wire it now AND on its load event. The load handler
+                  // resets the wired flag first because srcdoc / dynamic
+                  // iframes start with a transient about:blank document
+                  // that gets REPLACED when content arrives — listeners
+                  // attached to the transient doc never fire.
+                  try {
+                    n.addEventListener('load', function () {
+                      n.__zacFrameWired = false;
+                      __zacAttachFrameRecorders();
+                    });
+                  } catch (_) {}
+                  __zacAttachFrameRecorders();
+                }
+              }
+            }
+          });
+          __zacIframeObserver.observe(document.documentElement, { childList: true, subtree: true });
+        } catch (_obsErr) { /* MutationObserver not available */ }
+        // Per-iframe load listeners for frames already in the DOM.
+        try {
+          document.querySelectorAll('iframe, frame').forEach(function (f) {
+            if (f.__zacLoadHooked) return;
+            f.__zacLoadHooked = true;
+            f.addEventListener('load', function () {
+              // Same transient-document handling as the MO branch.
+              f.__zacFrameWired = false;
+              __zacAttachFrameRecorders();
+            });
+          });
+        } catch (_loadErr) { /* swallow */ }
+        // Periodic re-scan — handles same-origin frames that finish
+        // loading well after page-load and are missed by all of the
+        // above (rare, but cheap to defend against).
+        try {
+          if (!window.__zacFrameRescan) {
+            window.__zacFrameRescan = setInterval(__zacAttachFrameRecorders, 1000);
+          }
+        } catch (_rescanErr) { /* swallow */ }
 
         // ── T2.8 Auto-suggested smart assertions ─────────────────────
         // After every meaningful interaction (click, type-blur), propose a
