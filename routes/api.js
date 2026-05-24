@@ -3946,12 +3946,32 @@ router.get('/runs/history', pollingRateLimiter, asyncHandler(async (req, res) =>
   const file = path.resolve(process.cwd(), 'reports', 'rerun-history.jsonl');
   try {
     const text = await fs.readFile(file, 'utf8');
-    const rows = text.split('\n').filter(Boolean).map(l => {
+    const allRows = text.split('\n').filter(Boolean).map(l => {
       try { return JSON.parse(l); } catch { return null; }
     }).filter(Boolean);
+
+    // [ZAC-FIX 2026-05-24] existingOnly filter — when true (default),
+    // hide rows whose project no longer exists in projects/. The log
+    // file is append-only and accumulates rows from harness runs +
+    // deleted projects, polluting the Runner dropdown with stale
+    // values like 'unknown' that the user can't tie back to anything.
+    // Pass ?existingOnly=false to see the full historical log.
+    const existingOnly = String(req.query.existingOnly ?? 'true').toLowerCase() !== 'false';
+    let rows = allRows;
+    let hiddenCount = 0;
+    if (existingOnly) {
+      const projDir = path.resolve(process.cwd(), 'projects');
+      const realIds = new Set(
+        (await fs.readdir(projDir, { withFileTypes: true }).catch(() => []))
+          .filter((e) => e.isDirectory())
+          .map((e) => e.name)
+      );
+      rows = allRows.filter((r) => r.project && realIds.has(r.project));
+      hiddenCount = allRows.length - rows.length;
+    }
     const limit = Math.min(Number(req.query.limit) || 200, 500);
     const filtered = rows.slice(-limit).reverse();
-    res.json({ ok: true, total: rows.length, rows: filtered });
+    res.json({ ok: true, total: rows.length, totalAll: allRows.length, hiddenCount, rows: filtered });
   } catch (e) {
     if (e.code === 'ENOENT') return res.json({ ok: true, total: 0, rows: [] });
     res.status(500).json({ ok: false, error: e.message });
@@ -4539,14 +4559,40 @@ router.post('/dashboard/clean-orphans', strictRateLimiter, asyncHandler(async (r
         }
       }
     }
-    console.log(`[API] /dashboard/clean-orphans removed ${removed.length} dir(s) (errors: ${errors.length})`);
+    // [ZAC-FIX 2026-05-24] Also compact reports/rerun-history.jsonl —
+    // an append-only log that accumulates a row per rerun across the
+    // entire dev lifetime. After deleting projects the dashboard's
+    // Runner dropdown still pulls 'unknown / mocha / testng / etc.'
+    // from this log, even though no current project uses them. Drop
+    // every row whose `project` is no longer in projects/.
+    let logCompacted = { kept: 0, removed: 0 };
+    try {
+      const logFile = path.join(repoRoot, 'reports', 'rerun-history.jsonl');
+      const text = await fsp.readFile(logFile, 'utf8').catch(() => '');
+      if (text) {
+        const all = text.split('\n').filter(Boolean).map((l) => {
+          try { return JSON.parse(l); } catch { return null; }
+        }).filter(Boolean);
+        const kept = all.filter((r) => r && r.project && realIds.has(r.project));
+        if (kept.length !== all.length) {
+          await fsp.writeFile(logFile, kept.map((r) => JSON.stringify(r)).join('\n') + (kept.length ? '\n' : ''), 'utf8');
+        }
+        logCompacted = { kept: kept.length, removed: all.length - kept.length };
+      }
+    } catch (e) {
+      console.warn('[API] /dashboard/clean-orphans: log compaction failed:', e.message);
+    }
+
+    console.log(`[API] /dashboard/clean-orphans removed ${removed.length} dir(s) + ${logCompacted.removed} log rows (errors: ${errors.length})`);
     res.json({
       success: true,
       removed,
       errors,
       removedCount: removed.length,
+      historyCompacted: logCompacted,
       keptRealProjects: Array.from(realIds),
-      message: `Cleaned ${removed.length} orphan director${removed.length === 1 ? 'y' : 'ies'}.`,
+      message: `Cleaned ${removed.length} orphan director${removed.length === 1 ? 'y' : 'ies'}` +
+        (logCompacted.removed ? ` + ${logCompacted.removed} stale history row${logCompacted.removed === 1 ? '' : 's'}` : '') + '.',
     });
   } catch (e) {
     console.error('[API] /dashboard/clean-orphans error:', e);

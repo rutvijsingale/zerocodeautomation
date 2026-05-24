@@ -273,7 +273,15 @@
     async function syncRunnerOptions() {
       if (!trSelect) return;
       try {
-        const r = await fetch('/api/runs/history?limit=500');
+        // [ZAC-FIX 2026-05-24] Honour the "Include orphan projects"
+        // toggle. By default the server filters out runner rows
+        // belonging to deleted projects, so the dropdown shows only
+        // runners that match existing projects (no more "unknown" /
+        // "mocha" leftovers from harness runs). When the toggle is
+        // on, expose the full historical log for forensic browsing.
+        const includeOrphans = !!window.zacIncludeOrphans;
+        const url = '/api/runs/history?limit=500' + (includeOrphans ? '&existingOnly=false' : '');
+        const r = await fetch(url);
         if (!r.ok) return;
         const data = await r.json();
         if (!data.ok) return;
