@@ -656,12 +656,41 @@
       if (target === 'on' && !r.ok) showToast(r.reason || 'Could not enable AI', 'error');
       else if (target === 'on')     showToast(`AI enabled — ${r.info.provider}/${r.info.model}`, 'ok');
       else                           showToast('AI disabled', 'info');
+      // [ZAC-FIX 2026-05-24] Broadcast for the top-bar badge + AI panel
+      // so they re-render without a page refresh. Same event that
+      // zacFixes.js fires after a Settings-page toggle.
+      try {
+        window.dispatchEvent(new CustomEvent('zac:ai-state-changed', {
+          detail: { info: r.info, reason: 'dashboard-toggle', at: Date.now() },
+        }));
+      } catch (_) { /* ignore */ }
+      // Also write through ZacSettings so OTHER tabs (Settings page,
+      // Recording page) see the change via the storage event. Without
+      // this, the Settings page checkbox stays out of sync until reload.
+      // NOTE: /api/ai/toggle returns { ok, mode, info: { provider,
+      // model, baseUrl } } — there is NO `available` field on the
+      // toggle response (that lives on /api/ai/info). Derive the
+      // desired bool from provider === 'ollama' + ok flag.
+      try {
+        const desired = target === 'on' && r.ok && r.info?.provider === 'ollama';
+        if (window.ZacSettings && window.ZacSettings.get().ollamaEnabled !== desired) {
+          window.ZacSettings.set({ ollamaEnabled: desired });
+        }
+      } catch (_) { /* ZacSettings might not be loaded — ignore */ }
     } catch (e) {
       setAiBadgeState({ provider: 'null', reason: e.message }, target);
       showToast('Toggle failed: ' + e.message, 'error');
     } finally {
       btn.disabled = false;
     }
+  });
+
+  // [ZAC-FIX 2026-05-24] Listen for AI state changes triggered elsewhere
+  // (Settings page toggle, AI panel, another tab) and re-render the
+  // dashboard badge live.
+  window.addEventListener('zac:ai-state-changed', (e) => {
+    const info = e?.detail?.info;
+    setAiBadgeState(info, info?.available ? 'on' : 'off');
   });
 
   function showToast(msg, kind) {

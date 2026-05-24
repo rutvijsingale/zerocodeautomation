@@ -42,14 +42,49 @@
   document.body.classList.add('tab-recorder');
 
   // AI badge — non-blocking; failure stays silent.
-  fetch('/api/ai/info').then((r) => r.json()).then((info) => {
+  // [ZAC-FIX 2026-05-24] Re-render whenever zacFixes broadcasts that AI
+  // state changed (same-tab toggle from Settings, cross-tab toggle from
+  // another window). Avoids the "AI off everywhere until I refresh" UX.
+  function paintAiBadge(info) {
     const b = document.getElementById('aiBadge');
     if (!b) return;
-    if (info.available) {
+    if (info && info.available) {
       b.classList.add('on'); b.classList.remove('off');
       b.textContent = `AI: ${info.provider} (${info.model})`;
     } else {
+      b.classList.remove('on'); b.classList.add('off');
       b.textContent = 'AI: off';
     }
-  }).catch(() => { /* silent */ });
+  }
+  async function refetchAndBroadcast(reason) {
+    try {
+      const info = await (await fetch('/api/ai/info')).json();
+      paintAiBadge(info);
+      // Same-tab event so the dashboard #aiToggleBtn, the floating AI
+      // panel's connection badge, and any future listener can react.
+      window.dispatchEvent(new CustomEvent('zac:ai-state-changed', {
+        detail: { info, reason: reason || 'storage', at: Date.now() },
+      }));
+    } catch (_) { /* silent */ }
+  }
+  // Initial fetch
+  fetch('/api/ai/info').then((r) => r.json()).then(paintAiBadge).catch(() => {/* silent */});
+  // Same-tab live updates from Settings/Dashboard toggles
+  window.addEventListener('zac:ai-state-changed', (e) => {
+    paintAiBadge(e?.detail?.info);
+  });
+  // [ZAC-FIX 2026-05-24] Cross-tab bridge — listens for the storage
+  // event that fires when ANOTHER tab writes zac_settings (which the
+  // dashboard + settings toggles do via ZacSettings.set). Re-fetches
+  // /api/ai/info from the server (which is the source of truth) and
+  // broadcasts the same in-tab event. This is what makes "toggle in
+  // Settings → see it in Recording without refreshing" actually work.
+  window.addEventListener('storage', (e) => {
+    if (!e || e.key !== 'zac_settings') return;
+    let oldOn, newOn;
+    try { oldOn = !!(JSON.parse(e.oldValue || '{}').ollamaEnabled); } catch { oldOn = null; }
+    try { newOn = !!(JSON.parse(e.newValue || '{}').ollamaEnabled); } catch { newOn = null; }
+    if (oldOn === newOn) return; // ai state unchanged in this storage write
+    refetchAndBroadcast('cross-tab-storage');
+  });
 })();

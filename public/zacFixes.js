@@ -410,7 +410,7 @@
     const status     = document.getElementById('zacOllamaStatus');
     const testBtn    = document.getElementById('zacOllamaTestBtn');
     const saveBtn    = document.getElementById('zacOllamaSaveBtn');
-    const aiToggle   = document.getElementById('aiToggle'); // legacy "Local AI Engine" switch
+    let aiToggle     = document.getElementById('aiToggle'); // legacy "Local AI Engine" switch (will be re-bound after clone below)
     if (!ZAC) return;
     if (!endpoint && !aiToggle) return; // not on a settings-bearing page
 
@@ -425,7 +425,14 @@
       suppressToggleEffects = true;
       try {
         if (enabled  && enabled.checked  !== isOn) enabled.checked  = isOn;
-        if (aiToggle && aiToggle.checked !== isOn) aiToggle.checked = isOn;
+        // [ZAC-FIX 2026-05-24] Always look the legacy checkbox up by ID
+        // here — the clone-and-replace below makes any cached `aiToggle`
+        // closure variable point at a detached node, so writes silently
+        // missed the live DOM. Looking it up fresh costs ~microseconds
+        // and means the cross-tab sync always lands on the visible
+        // checkbox.
+        const liveAi = document.getElementById('aiToggle');
+        if (liveAi && liveAi.checked !== isOn) liveAi.checked = isOn;
         // ZacSettings store mirrors too — single source of truth in localStorage.
         if (ZAC.get().ollamaEnabled !== isOn) ZAC.set({ ollamaEnabled: isOn });
       } finally {
@@ -450,6 +457,18 @@
             : 'idle';
           status.className = 'status ' + (info.available ? 'ok' : '');
         }
+        // [ZAC-FIX 2026-05-24] Broadcast a same-tab event so EVERY AI
+        // status display re-renders without a page reload. The four
+        // consumers (top-bar AI badge in app-tabs.js, dashboard's
+        // #aiToggleBtn, the floating AI panel in aiAssistant.js, and
+        // anything else that subscribes) listen for this and refresh
+        // their UI from `info` directly. Cross-tab sync still works
+        // through ZacSettings + the storage event.
+        try {
+          window.dispatchEvent(new CustomEvent('zac:ai-state-changed', {
+            detail: { info, reason: reason || 'unknown', at: Date.now() },
+          }));
+        } catch (_) { /* CustomEvent should always be present in modern browsers */ }
       } catch (_) { /* silent — leave UI as-is */ }
     }
 
@@ -522,6 +541,10 @@
     ZAC.subscribe((s, change) => {
       if (!change || change.initial || change.crossTab !== true) return;
       setBothCheckboxes(!!s.ollamaEnabled);
+      // [ZAC-FIX 2026-05-24] Cross-tab AI toggle: re-pull the live
+      // /api/ai/info (storage doesn't carry the model/baseUrl) and
+      // broadcast for the in-tab listeners to refresh.
+      refreshFromServer('cross-tab');
     });
 
     refreshFromServer('boot');

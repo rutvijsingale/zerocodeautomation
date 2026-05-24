@@ -311,6 +311,17 @@
       const lbl = document.getElementById('zac-ai-model-label');
       if (lbl) lbl.textContent = s.ollamaModel || 'mistral';
     });
+    // [ZAC-FIX 2026-05-24] Re-ping Ollama whenever AI state changes
+    // (Settings toggle, dashboard toggle, cross-tab change) so the
+    // panel's connection badge updates live without a page refresh.
+    // Only re-pings if the panel is open — otherwise the next open
+    // call already does it via togglePanel().
+    window.addEventListener('zac:ai-state-changed', () => {
+      const panel = document.getElementById('zac-ai-panel');
+      if (panel && !panel.classList.contains('collapsed')) {
+        pingOllama();
+      }
+    });
     console.log('[ZAC-FIX] AI Assistant panel ready (Ctrl+Shift+A to toggle).');
   }
 
