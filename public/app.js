@@ -4359,6 +4359,21 @@ document.addEventListener('DOMContentLoaded', () => {
         (seleniumEl && seleniumEl.value && seleniumEl.value.trim().length > 50) ||
         (stepsEl && stepsEl.value && stepsEl.value.trim().length > 50)
       );
+      // Test hook (no-op in production): record what happened so headless
+      // matrix tests can assert the listener path without depending on
+      // dialog-handler races. The window flag is opt-in (only populated
+      // when the test sets `window.__zacFwListenerLog = []`).
+      try {
+        if (Array.isArray(window.__zacFwListenerLog)) {
+          window.__zacFwListenerLog.push({
+            newFw,
+            isTrusted: e.isTrusted,
+            seleniumLen: seleniumEl ? seleniumEl.value.length : -1,
+            stepsLen: stepsEl ? stepsEl.value.length : -1,
+            hasUserContent,
+          });
+        }
+      } catch (_) {}
       if (hasUserContent) {
         const ok = window.confirm(
           'Switching framework will regenerate the Selenium/Playwright code ' +
