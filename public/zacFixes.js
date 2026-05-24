@@ -1013,13 +1013,52 @@
 
     function tickCount() {
       // Pull a quick count of how many projects are hidden right now —
-      // makes the toggle informative even when off.
+      // makes the toggle informative even when off. Surfaces BOTH the
+      // project count AND the rerun count, because the more important
+      // signal for a confused user is "you have N reruns hidden".
       fetch('/api/dashboard/stats?existingOnly=true').then(r => r.json()).then(d => {
-        const hidden = d?.summary?.orphansHidden || 0;
-        if (counter) counter.textContent = hidden ? `(${hidden} hidden)` : '';
-        if (label) label.title = hidden
-          ? `${hidden} orphan project director${hidden === 1 ? 'y' : 'ies'} on disk are hidden by default. Tick to show them.`
-          : 'No orphan projects detected.';
+        const hiddenProjects = d?.summary?.orphansHidden || 0;
+        const hiddenReruns   = d?.summary?.hiddenReruns   || 0;
+        // Counter text — prefer rerun count since that's what users care about
+        let txt = '';
+        if (hiddenReruns > 0)        txt = `(${hiddenReruns} hidden run${hiddenReruns === 1 ? '' : 's'})`;
+        else if (hiddenProjects > 0) txt = `(${hiddenProjects} hidden project${hiddenProjects === 1 ? '' : 's'})`;
+        if (counter) counter.textContent = txt;
+        if (label) label.title = (hiddenProjects || hiddenReruns)
+          ? `${hiddenReruns} run${hiddenReruns === 1 ? '' : 's'} from ${hiddenProjects} orphan project${hiddenProjects === 1 ? '' : 's'} on disk are hidden by default. Tick to show them.`
+          : 'No orphan projects or reruns detected.';
+        // [ZAC-FIX 2026-05-24] Also paint a prominent banner above
+        // the dashboard so users SEE that data is being filtered out.
+        // Only shown when:
+        //   - filter is on (user is hiding things)
+        //   - hidden runs > 0 (there's actually something to surface)
+        //   - the visible reruns list is empty (otherwise the user has
+        //     plenty to see and a banner would be noise).
+        const filterOn = !cb.checked;
+        const visibleReruns = d?.summary?.totalReruns || 0;
+        let banner = document.getElementById('zac-hidden-runs-banner');
+        if (filterOn && hiddenReruns > 0 && visibleReruns === 0) {
+          if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'zac-hidden-runs-banner';
+            banner.style.cssText =
+              'margin:10px 0 14px;padding:10px 14px;border:1px solid rgba(245,158,11,0.45);' +
+              'border-radius:6px;background:rgba(245,158,11,0.08);color:#f59e0b;' +
+              'display:flex;align-items:center;gap:10px;font-size:13px;';
+            const main = document.querySelector('.dashboard-main, main, .main') || document.body;
+            main.insertBefore(banner, main.firstChild);
+          }
+          banner.innerHTML =
+            `⚠️ <strong>${hiddenReruns} run${hiddenReruns === 1 ? '' : 's'} hidden</strong> ` +
+            `because the originating project${hiddenProjects === 1 ? '' : 's'} ` +
+            `${hiddenProjects === 1 ? 'is' : 'are'} no longer in <code>projects/</code>. ` +
+            `<button id="zac-show-hidden-runs" style="margin-left:auto;background:#f59e0b;color:#0c0f15;` +
+            `border:0;padding:6px 12px;border-radius:4px;font-weight:600;cursor:pointer;">Show all runs</button>`;
+          const btn = document.getElementById('zac-show-hidden-runs');
+          if (btn) btn.onclick = () => { cb.checked = true; cb.dispatchEvent(new Event('change')); };
+        } else if (banner) {
+          banner.remove();
+        }
       }).catch(() => {});
     }
 
@@ -1031,6 +1070,11 @@
       // Force the dashboard's load() if it's exposed.
       try { if (typeof window.load === 'function') window.load(); } catch {}
       showToast(cb.checked ? 'Showing all projects (incl. orphans)' : 'Showing only existing projects', 'info');
+      // [ZAC-FIX 2026-05-24] Re-run the count + banner refresh
+      // immediately so the "X hidden runs" banner disappears the
+      // instant the user clicks "Show all" instead of waiting for
+      // the 8s tick.
+      tickCount();
     });
 
     tickCount();

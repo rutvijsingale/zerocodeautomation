@@ -115,6 +115,10 @@ export async function collectDashboardStats(opts = {}) {
       // Surfaces back to the dashboard so it can label the view honestly.
       filteredToExisting: !!existingOnly,
       orphansHidden: 0,
+      // [ZAC-FIX 2026-05-24] Count RERUNS belonging to orphan
+      // projects so the dashboard can show "N hidden runs · Show
+      // all" instead of silently lying about empty run history.
+      hiddenReruns: 0,
     },
     frameworks: [],
     projects: [],
@@ -135,6 +139,27 @@ export async function collectDashboardStats(opts = {}) {
       ? projectDirs.filter(p => existingSet.has(p))
       : projectDirs;
     out.summary.orphansHidden += projectDirs.length - visibleProjects.length;
+    // [ZAC-FIX 2026-05-24] Count rerun replay files that BELONG to
+    // hidden orphan projects so we can tell the user they have
+    // run history that's currently filtered out. Cheap directory
+    // walk — counts files only.
+    if (existingSet) {
+      const hiddenProjects = projectDirs.filter(p => !existingSet.has(p));
+      for (const orphan of hiddenProjects) {
+        const orphanReruns = path.join(fwRoot, orphan, 'reruns');
+        const tests = await listSorted(orphanReruns);
+        for (const t of tests) {
+          const tsList = await listSorted(path.join(orphanReruns, t));
+          for (const ts of tsList) {
+            const f = path.join(orphanReruns, t, ts, 'replay-result.json');
+            try {
+              await fs.access(f);
+              out.summary.hiddenReruns++;
+            } catch (_) { /* missing replay-result.json — skip */ }
+          }
+        }
+      }
+    }
     out.frameworks.push({ id: fw, projectCount: visibleProjects.length });
 
     for (const projectId of visibleProjects) {
