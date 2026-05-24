@@ -882,6 +882,19 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
       args: buildRerunLaunchArgs(browserType, headless),
     });
     executionState.browser = browser;
+    // [ZAC-FIX 2026-05-24] User-closed-browser detection — when the
+    // user X's the rerun browser window, Playwright fires
+    // 'disconnected'. Without this listener the rerun loop could
+    // keep trying to drive a dead browser, throwing confusing errors
+    // and leaking the executionState. Mark cancelled + drop from
+    // runningReruns so /api/rerun/cancel returns "already completed"
+    // gracefully and the next rerun gets a clean slate.
+    browser.once('disconnected', () => {
+      console.log(`[Rerun] 🔌 Browser disconnected externally — marking ${executionId} cancelled`);
+      try { executionState.cancelled = true; } catch (_) {}
+      try { runningReruns.delete(executionId); } catch (_) {}
+      if (mostRecentExecutionId === executionId) mostRecentExecutionId = null;
+    });
 
     // Detect screen size dynamically for proper fitting
     let screenSize = { width: 1920, height: 1080 }; // Default fallback
@@ -1528,6 +1541,15 @@ async function executeMultiScenario(req, res, scenarios, browserType, baseUrl, h
     const launcher = browserType === 'firefox' ? firefox : browserType === 'webkit' ? webkit : chromium;
     browser = await launcher.launch({ headless, args: buildRerunLaunchArgs(browserType, headless) });
     executionState.browser = browser;
+    // [ZAC-FIX 2026-05-24] Same external-close detection as the plain
+    // rerun branch — if the user X's the multi-scenario browser, drop
+    // the executionState so cancel/status return cleanly.
+    browser.once('disconnected', () => {
+      console.log(`[Rerun] 🔌 Multi-scenario browser disconnected externally — marking ${executionId} cancelled`);
+      try { executionState.cancelled = true; } catch (_) {}
+      try { runningReruns.delete(executionId); } catch (_) {}
+      if (mostRecentExecutionId === executionId) mostRecentExecutionId = null;
+    });
     context = await browser.newContext();
     executionState.context = context;
     page = await context.newPage();
@@ -1741,7 +1763,15 @@ async function executeScenarioOutline(req, res, steps, browserType, baseUrl, hea
       args: buildRerunLaunchArgs(browserType, headless),
     });
     executionState.browser = browser;
-    
+    // [ZAC-FIX 2026-05-24] External-close detection for Scenario Outline
+    // execution — same shape as the plain rerun branch.
+    browser.once('disconnected', () => {
+      console.log(`[Rerun] 🔌 Outline browser disconnected externally — marking ${executionId} cancelled`);
+      try { executionState.cancelled = true; } catch (_) {}
+      try { runningReruns.delete(executionId); } catch (_) {}
+      if (mostRecentExecutionId === executionId) mostRecentExecutionId = null;
+    });
+
     if (executionState.cancelled) {
       throw new Error('Execution cancelled after browser launch');
     }

@@ -190,6 +190,35 @@ export class BrowserService {
 
       console.log(`[BrowserService] ✅ Browser context created with viewport: ${viewportConfig === null ? 'full window (maximized)' : `${viewportConfig.width}x${viewportConfig.height}`}`);
 
+      // [ZAC-FIX 2026-05-24] Detect external browser-window close.
+      //
+      // Until now, if the user clicked the X on the recorded browser
+      // window (instead of the "Stop" button in the IDE), Playwright's
+      // browser process exited but ZAC's session map still held a
+      // dead handle. Symptoms reported by the user:
+      //   - "Browser close was not working"
+      //   - status polling kept reporting active
+      //   - subsequent Stop calls did nothing
+      //
+      // Wire BOTH listeners so any kill-path (X button, OS kill,
+      // crash, browser disconnect) fires destroySession exactly once.
+      // destroySession is idempotent — safe even if /recording/stop
+      // also calls it.
+      const onExternalClose = (reason) => {
+        console.log(`[BrowserService] 🔌 ${reason} for session ${sessionId} — cleaning up`);
+        // Don't await; let it run in the background. If the call comes
+        // mid-action, we still want activeSessions to drop the entry
+        // immediately so polling reports "session gone".
+        this.destroySession(sessionId).catch((e) => {
+          console.warn(`[BrowserService] destroySession after ${reason} threw:`, e.message);
+        });
+      };
+      // Browser process disconnected (X click, OS kill, browser crash, …)
+      browser.once('disconnected', () => onExternalClose('browser.disconnected'));
+      // Context closed (rare — usually closes with the browser, but covers
+      // edge cases where Playwright closes the context independently).
+      context.once('close', () => onExternalClose('context.close'));
+
       // Inject recording script at context level (persists across all pages)
       await this.injectRecordingScript(context, sessionId);
 
