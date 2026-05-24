@@ -47,6 +47,13 @@ const state = {
   pendingRecording: null // Stores recording data waiting for user approval
 };
 
+// [ZAC-FIX 2026-05-24] Expose `state` on window so other same-origin
+// scripts (zacFixes.js framework-pill installer, the rerun→dashboard
+// harness, and any future integration) can read currentProjectId /
+// currentProjectFramework / steps without parsing app.js's IIFE
+// closure. Read-only by convention; mutate at your own risk.
+try { if (typeof window !== 'undefined') window.state = state; } catch (_) { /* SSR/sandbox */ }
+
 // State history management for revert functionality
 function saveStateSnapshot() {
   try {
@@ -5230,6 +5237,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      // [ZAC-FIX 2026-05-24] If no project is selected/saved, the
+      // server can't persist replay-result.json (the dashboard's
+      // source of truth) and the rerun won't appear in any report.
+      // Tell the user up-front instead of letting them rerun N times
+      // and wonder why the dashboard is empty.
+      if (!state.currentProjectId) {
+        const proceed = window.confirm(
+          'No project is currently saved.\n\n' +
+          'You can still rerun, but the result will NOT appear in the ' +
+          'Dashboard or any report (we have nowhere to file it).\n\n' +
+          'Click OK to rerun anyway, or Cancel to save the project first ' +
+          '(use "Save Project" or pick one from the dropdown).'
+        );
+        if (!proceed) return;
+      }
+
       const rerunStatusEl = document.getElementById('rerunStatus');
       const rerunStatusIcon = document.getElementById('rerunStatusIcon');
       const rerunStatusText = document.getElementById('rerunStatusText');
@@ -5277,6 +5300,25 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
         
+        // [ZAC-FIX 2026-05-24] Pass projectId / framework / testName so
+        // the server persists the rerun to disk under
+        //   generated-projects/<framework>/<projectId>/reruns/<testName>/<timestamp>/replay-result.json
+        // Without these three fields the rerun runs in-memory and the
+        // dashboard never sees it (root cause of: "after rerunning not
+        // even once report is generated in the dashboard"). Falls
+        // back to the dropdown-selected framework + a synthesised
+        // testName when the project hasn't been saved yet.
+        const rerunFramework = state.currentProjectFramework
+          || document.getElementById('framework')?.value
+          || 'playwright-java';
+        const rerunTestName = (state.currentProjectName
+          || state.currentProjectId
+          || 'rerun-' + new Date().toISOString().slice(0, 10))
+          .toString()
+          .replace(/[^a-zA-Z0-9._-]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 60) || 'rerun';
+
         const payload = {
           steps: state.steps,
           browserType: document.getElementById('browserType')?.value || 'chromium',
@@ -5284,7 +5326,11 @@ document.addEventListener('DOMContentLoaded', () => {
           headless: false, // Show browser during execution
           useScenarioOutline: useScenarioOutline,
           examples: examples,
-          stopOnFailure: document.getElementById('stopOnFailure')?.checked || false
+          stopOnFailure: document.getElementById('stopOnFailure')?.checked || false,
+          // Persist-to-disk hints (used by routes/api.js#/api/rerun → ensureRerunScaffold)
+          projectId: state.currentProjectId || undefined,
+          framework: rerunFramework,
+          testName: rerunTestName,
         };
 
         const resp = await fetch('/api/rerun', {
