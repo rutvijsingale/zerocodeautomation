@@ -125,6 +125,15 @@ function api(method, path, body) {
   }, { timeout: 90000 });
   console.log('   rerun completed.');
 
+  // [ZAC-FIX 2026-05-24] Verify the post-rerun "Open Report" link
+  // shows up so users have a one-click jump from rerun → report.
+  const rerunResultsHtml = await page.locator('#rerunResults').innerHTML();
+  const openReportLink = await page.locator('#rerunResults a[href*="/report.html?path="]').count();
+  const downloadLink = await page.locator('#rerunResults a[href*="/api/dashboard/report/html"]').count();
+  chk(`Recording panel shows "Open report" link (${openReportLink})`, openReportLink >= 1,
+    rerunResultsHtml.slice(0, 200));
+  chk(`Recording panel shows "Download .html" link (${downloadLink})`, downloadLink >= 1);
+
   await browser.close();
 
   // ── 3. Dashboard sees it ─────────────────────────────────────────────
@@ -147,13 +156,27 @@ function api(method, path, body) {
   const match2 = (stats2.body?.reruns || []).filter(r => r.projectId === PID);
   chk(`existingOnly=true also sees the rerun (${match2.length})`, match2.length >= 1);
 
-  // ── 4. replay-result.json on disk ────────────────────────────────────
-  console.log('\n── 4. replay-result.json on disk ──');
+  // ── 4. replay-result.json + report/index.html on disk ──────────────
+  console.log('\n── 4. replay-result.json + report/index.html on disk ──');
   const projDir = resolve(ROOT, 'generated-projects', FW, PID, 'reruns');
   const found = spawnSync('find', [projDir, '-name', 'replay-result.json']).stdout.toString().trim();
   chk(`replay-result.json found under ${FW}/${PID}/reruns/`,
     found.length > 0,
     found || 'no file found');
+  // [ZAC-FIX 2026-05-24] Persisted HTML report alongside the JSON
+  // so users have a portable, openable artefact without going
+  // through the dashboard.
+  const htmlFiles = spawnSync('find', [projDir, '-path', '*/report/index.html']).stdout.toString().trim();
+  chk(`report/index.html persisted alongside replay-result.json`,
+    htmlFiles.length > 0,
+    htmlFiles || 'no report/index.html found');
+  if (htmlFiles.length > 0) {
+    const fs = await import('fs/promises');
+    const stat = await fs.stat(htmlFiles.split('\n')[0]);
+    chk(`report/index.html is non-trivial (${stat.size} bytes ≥ 4 KB)`,
+      stat.size >= 4 * 1024,
+      `${stat.size} bytes`);
+  }
 
   // ── 5. HTML report renders for the rerun ─────────────────────────────
   console.log('\n── 5. /api/dashboard/report/html renders ──');

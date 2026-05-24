@@ -59,6 +59,35 @@ const fileService = new FileService();
 //   - any browser headless → omit (no window to maximize)
 //
 // Tests covering this live in automation-suite/unit-js/launch_args.test.mjs.
+// [ZAC-FIX 2026-05-24] Persist a self-contained HTML report alongside
+// replay-result.json so users can open the report directly from disk
+// (or attach to an email / Jira / Slack) WITHOUT having to navigate
+// the dashboard. The dashboard's `/api/dashboard/report/html` endpoint
+// already renders the same HTML on-demand from the JSON, but a stale
+// JSON-only state on disk meant users had no portable artefact and
+// reasonably reported "the rerun didn't generate a report".
+//
+// Best-effort: a render failure must never break the rerun success
+// path (the JSON is the source of truth — HTML is a derived view).
+async function persistRerunHtmlReport({ scaffold, replayPayload, framework, projectId, testName }) {
+  try {
+    const fsp = await import('fs/promises');
+    const { renderHtmlReport } = await import('../services/reportRenderer.js');
+    const html = renderHtmlReport({
+      replayResult: replayPayload,
+      reportPath: `${framework}/${projectId}/reruns/${testName}/${scaffold.timestamp}`,
+      generatedAt: new Date().toISOString(),
+    });
+    await fsp.mkdir(scaffold.report, { recursive: true });
+    const reportFile = path.join(scaffold.report, 'index.html');
+    await fsp.writeFile(reportFile, html, 'utf8');
+    return reportFile;
+  } catch (err) {
+    console.warn('[Rerun] HTML report render failed (replay-result.json is still on disk):', err.message);
+    return null;
+  }
+}
+
 function buildRerunLaunchArgs(browserType, headless) {
   const args = ['--no-sandbox', '--disable-setuid-sandbox'];
   if (!headless && (browserType === 'chromium' || browserType === 'edge')) {
@@ -1386,6 +1415,13 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
             JSON.stringify(replayPayload, null, 2),
             'utf8'
           );
+          // Persist the HTML report next to the JSON for portability.
+          const htmlPath = await persistRerunHtmlReport({
+            scaffold, replayPayload,
+            framework: scaffold.project.framework,
+            projectId: scaffold.project.projectName,
+            testName: scaffold.testName,
+          });
           rerunLayout = {
             framework: scaffold.project.framework,
             projectName: scaffold.project.projectName,
@@ -1394,8 +1430,9 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
             rerunDir: scaffold.rerunDir,
             report: scaffold.report,
             replayResult: scaffold.replayResult,
+            htmlReport: htmlPath,
           };
-          console.log(`[Rerun] Persisted rerun report (status.json + replay-result.json) to ${scaffold.rerunDir}`);
+          console.log(`[Rerun] Persisted rerun report (status.json + replay-result.json + report/index.html) to ${scaffold.rerunDir}`);
 
           // Bump the live-counter exposed via /api/dashboard/live so any
           // open dashboard refreshes its stats within ~2s instead of
@@ -1676,6 +1713,12 @@ async function executeMultiScenario(req, res, scenarios, browserType, baseUrl, h
           await fsp.writeFile(scaffold.replayResult, JSON.stringify(replayPayload, null, 2), 'utf8');
           await fsp.writeFile(path.join(scaffold.report, 'status.json'),
             JSON.stringify(replayPayload, null, 2), 'utf8');
+          const htmlPathMulti = await persistRerunHtmlReport({
+            scaffold, replayPayload,
+            framework: scaffold.project.framework,
+            projectId: scaffold.project.projectName,
+            testName: scaffold.testName,
+          });
           rerunLayout = {
             framework: scaffold.project.framework,
             projectName: scaffold.project.projectName,
@@ -1684,6 +1727,7 @@ async function executeMultiScenario(req, res, scenarios, browserType, baseUrl, h
             rerunDir: scaffold.rerunDir,
             report: scaffold.report,
             replayResult: scaffold.replayResult,
+            htmlReport: htmlPathMulti,
           };
           try {
             const { markRerunCompleted } = await import('../services/dashboardService.js');
@@ -2054,6 +2098,12 @@ async function executeScenarioOutline(req, res, steps, browserType, baseUrl, hea
           await fsp.writeFile(scaffold.replayResult, JSON.stringify(replayPayload, null, 2), 'utf8');
           await fsp.writeFile(path.join(scaffold.report, 'status.json'),
             JSON.stringify({ ...replayPayload, scenarioOutline: true }, null, 2), 'utf8');
+          const htmlPathOutline = await persistRerunHtmlReport({
+            scaffold, replayPayload: { ...replayPayload, scenarioOutline: true },
+            framework: scaffold.project.framework,
+            projectId: scaffold.project.projectName,
+            testName: scaffold.testName,
+          });
           rerunLayout = {
             framework: scaffold.project.framework,
             projectName: scaffold.project.projectName,
@@ -2062,8 +2112,9 @@ async function executeScenarioOutline(req, res, steps, browserType, baseUrl, hea
             rerunDir: scaffold.rerunDir,
             report: scaffold.report,
             replayResult: scaffold.replayResult,
+            htmlReport: htmlPathOutline,
           };
-          console.log(`[Rerun] Persisted Scenario Outline rerun (status.json + replay-result.json) to ${scaffold.rerunDir}`);
+          console.log(`[Rerun] Persisted Scenario Outline rerun (status.json + replay-result.json + report/index.html) to ${scaffold.rerunDir}`);
           try {
             const { markRerunCompleted } = await import('../services/dashboardService.js');
             markRerunCompleted({

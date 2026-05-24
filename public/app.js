@@ -5437,6 +5437,34 @@ document.addEventListener('DOMContentLoaded', () => {
             rerunProgress.textContent = result.error || `All ${totalSteps} steps failed (${result.duration || 'N/A'})`;
           }
           
+          // [ZAC-FIX 2026-05-24] When the rerun was persisted, surface a
+          // direct "Open Report" link in the post-rerun panel — users
+          // were rerunning N times and wondering "where's the report?"
+          // because they had to dig into the Dashboard tab. Now there's
+          // a one-click jump straight to the rendered HTML report.
+          // The link works because routes/api.js now returns rerunLayout
+          // on EVERY branch (plain / Outline / multi-scenario).
+          let reportLink = '';
+          const layout = result.rerunLayout || result.layout;
+          if (layout && layout.framework && layout.projectName && layout.testName && layout.timestamp) {
+            const reportUrl = '/report.html?path=' + encodeURIComponent(
+              layout.framework + '/' + layout.projectName + '/reruns/' +
+              layout.testName + '/' + layout.timestamp
+            );
+            const dlUrl = '/api/dashboard/report/html?path=' + encodeURIComponent(
+              layout.framework + '/' + layout.projectName + '/reruns/' +
+              layout.testName + '/' + layout.timestamp
+            );
+            reportLink = `
+              <div style="display:flex;gap:8px;align-items:center;margin:8px 0 12px;padding:10px;border:1px solid rgba(16,185,129,0.35);border-radius:6px;background:rgba(16,185,129,0.08);">
+                <span style="color:#10b981;font-weight:600;">📊 Report ready</span>
+                <a href="${reportUrl}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;">Open report</a>
+                <span style="color:var(--muted);font-size:11px;">·</span>
+                <a href="${dlUrl}" download="${layout.testName}-${layout.timestamp}.html" style="color:var(--accent);text-decoration:none;">Download .html</a>
+                <span style="color:var(--muted);font-size:11px;margin-left:auto;">${layout.testName} @ ${layout.timestamp}</span>
+              </div>`;
+          }
+
           // Always show detailed results if available (for regular execution)
           if (result.results && result.results.length > 0 && !result.scenarioOutline) {
             // Pre-compute heal summary so we can flag the whole run when the
@@ -5469,7 +5497,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${r.error ? `<div style="color: #ef4444; font-size: 11px; margin-left: 24px; margin-top: 2px;">${r.error}</div>` : ''}
               </div>`;
             }).join('');
-            rerunResults.innerHTML = `<div style="max-height: 200px; overflow-y: auto; margin-top: 8px; font-family: monospace; font-size: 12px;">
+            rerunResults.innerHTML = `${reportLink}<div style="max-height: 200px; overflow-y: auto; margin-top: 8px; font-family: monospace; font-size: 12px;">
               <div style="color: var(--muted); font-size: 11px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2);">
                 📊 Step-by-step results (${result.cancelled ? 'execution cancelled' : `all ${totalSteps} steps executed`}):
               </div>
@@ -5478,7 +5506,10 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
           } else if (result.error && !result.scenarioOutline) {
             // Show error if no detailed results but error message exists
-            rerunResults.innerHTML = `<div style="color: #ef4444; margin-top: 8px;">${result.error}</div>`;
+            rerunResults.innerHTML = `${reportLink}<div style="color: #ef4444; margin-top: 8px;">${result.error}</div>`;
+          } else if (reportLink) {
+            // No step rows but persistence happened — still show the link.
+            rerunResults.innerHTML = reportLink;
           }
         }
       } catch (error) {
