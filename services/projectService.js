@@ -279,17 +279,66 @@ export class ProjectService {
     try {
       const projectDir = this.getProjectDir(projectId);
       await fs.rm(projectDir, { recursive: true, force: true });
-      
+
+      // [ZAC-FIX 2026-05-24] Single delete previously left orphans
+      // under generated-projects/<framework>/<projectId>/ (the
+      // generated Java/JS code, reruns, screenshots, videos). The
+      // dashboard then showed "ghost" projects with 0 reruns and
+      // confused QA. Sweep every framework dir and remove any
+      // matching folder. Anything else under generated-projects/
+      // (other projects, framework dirs themselves) is untouched.
+      try {
+        const repoRoot = path.resolve(this.projectsDir, '..');
+        const genRoot = path.join(repoRoot, 'generated-projects');
+        const frameworkDirs = await fs.readdir(genRoot, { withFileTypes: true }).catch(() => []);
+        for (const fw of frameworkDirs) {
+          if (!fw.isDirectory()) continue;
+          const target = path.join(genRoot, fw.name, projectId);
+          await fs.rm(target, { recursive: true, force: true }).catch(() => {});
+        }
+      } catch (genErr) {
+        // Best-effort: don't block the primary delete on cleanup failures.
+        console.warn(`[ProjectService] generated-projects cleanup for ${projectId} failed:`, genErr.message);
+      }
+
       if (this.currentProjectId === projectId) {
         this.currentProjectId = null;
       }
-      
+
       this.projectsCache = null;
       return true;
     } catch (error) {
       console.error(`[ProjectService] Error deleting project ${projectId}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Bulk-delete every project: wipes projects/<id>/ + every
+   * generated-projects/<framework>/<id>/ mirror for ids we own.
+   *
+   * Does NOT touch:
+   *   - config/ (frameworks.json, email.json, credentials.json)
+   *   - public/ (frontend assets)
+   *   - services/ (backend code)
+   *   - environments / locators-strategy snapshots stored elsewhere
+   *
+   * @returns {Promise<{ deleted: number, ids: string[], errors: Array<{id, error}> }>}
+   */
+  async deleteAllProjects() {
+    const projects = await this.listProjects();
+    const ids = projects.map((p) => p.id).filter(Boolean);
+    const errors = [];
+    for (const id of ids) {
+      try {
+        await this.deleteProject(id);
+      } catch (e) {
+        errors.push({ id, error: e.message });
+      }
+    }
+    this.currentProjectId = null;
+    this.projectsCache = null;
+    return { deleted: ids.length - errors.length, ids, errors };
   }
 
   /**

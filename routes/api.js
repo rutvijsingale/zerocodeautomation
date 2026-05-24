@@ -4350,6 +4350,56 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
 }));
 
 // Delete project
+// [ZAC-FIX 2026-05-24] Bulk delete every project at once.
+//
+// Wipes:
+//   - projects/<id>/                                  (recordings, locator repo, project.json)
+//   - generated-projects/<framework>/<id>/            (generated code, reruns, screenshots, videos)
+// for every id ZAC currently owns.
+//
+// DOES NOT TOUCH:
+//   - config/                (frameworks.json, email.json, credentials.json)
+//   - public/                (frontend assets / settings UI)
+//   - services/, routes/, middleware/, generators/   (server code)
+//   - environments / settings / locator-strategy snapshots stored in
+//     frontend localStorage
+//
+// Route MUST be declared BEFORE `/projects/:projectId` because Express
+// matches in order and `:projectId` would otherwise eat the bare path.
+//
+// Body: { confirm: true } REQUIRED — guards against accidental fires
+// from misconfigured clients. Returns the list of deleted ids so the
+// UI can show "Deleted 7 project(s)".
+router.delete('/projects', strictRateLimiter, asyncHandler(async (req, res) => {
+  console.log('[API] DELETE /api/projects (bulk) - Request received');
+  const confirm = req.body && (req.body.confirm === true || req.body.confirm === 'true');
+  if (!confirm) {
+    return res.status(400).json({
+      success: false,
+      error: 'Bulk project delete requires { "confirm": true } in the request body.',
+    });
+  }
+
+  try {
+    const result = await projectService.deleteAllProjects();
+    // Drop locator caches for every deleted project.
+    if (typeof locatorService.invalidateCache === 'function') {
+      for (const id of result.ids) locatorService.invalidateCache(id);
+    }
+    console.log(`[API] DELETE /api/projects (bulk) - Deleted ${result.deleted}/${result.ids.length} (errors=${result.errors.length})`);
+    res.json({
+      success: true,
+      deleted: result.deleted,
+      ids: result.ids,
+      errors: result.errors,
+      message: `Deleted ${result.deleted} project(s).`,
+    });
+  } catch (error) {
+    console.error('[API] DELETE /api/projects (bulk) - Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}));
+
 router.delete('/projects/:projectId', strictRateLimiter, asyncHandler(async (req, res) => {
   console.log('[API] DELETE /api/projects/:projectId - Request received', req.params.projectId);
   

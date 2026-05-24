@@ -403,6 +403,10 @@
         -->
         <button class="btn danger" id="clearBtn" title="Clear rerun history for the current filter scope">🗑 Clear runs</button>
         <button class="btn" id="clearRunsBtn" title="Delete rerun history. Honors the current Project / Framework filter — filtered runs are preserved.">🗑 Clear</button>
+        <!-- [ZAC-FIX 2026-05-24] Bulk-delete every project. Wipes recordings,
+             generated code, reruns, screenshots — but NOT settings, email
+             config, or AI/locator strategy. Confirms via a strict modal. -->
+        <button class="btn danger" id="deleteAllProjectsBtn" title="Delete EVERY project (recordings + generated code + reruns). Settings and config are preserved.">🗑 Delete all projects</button>
         <button class="btn primary" id="newRunBtn">+ New run</button>
       </div>
     </div>

@@ -993,6 +993,72 @@
     });
   }
 
+  // [ZAC-FIX 2026-05-24] "Delete all projects" — bulk wipe.
+  //
+  // Confirms via a hard double-prompt before firing DELETE /api/projects.
+  // The endpoint deletes:
+  //   - projects/<id>/                      (recordings, project.json, locator repo)
+  //   - generated-projects/<framework>/<id>/ (generated code, reruns, screenshots, videos)
+  //
+  // It does NOT touch:
+  //   - config/                  (frameworks.json, email.json, credentials.json)
+  //   - public/                  (frontend assets / Settings UI)
+  //   - the AI / locator-strategy / environment / settings stored in
+  //     localStorage on the user's browser
+  const deleteAllBtn = document.getElementById('deleteAllProjectsBtn');
+  if (deleteAllBtn) {
+    deleteAllBtn.addEventListener('click', async () => {
+      // Two-stage confirmation: a confirm() and then a typed-string check.
+      // Even with a misclick this can't fire by accident.
+      const ok1 = window.confirm(
+        'Delete EVERY project? This will remove all recordings, generated ' +
+        'code, reruns, screenshots, and videos.\n\n' +
+        'Settings, AI config, email config, framework registry, and locator ' +
+        'strategy snapshots will be PRESERVED.\n\n' +
+        'Click OK to continue.'
+      );
+      if (!ok1) return;
+      const typed = window.prompt(
+        'Type DELETE in capitals to confirm bulk-deleting every project:'
+      );
+      if (typed !== 'DELETE') {
+        showToast('Bulk delete cancelled.', 'info');
+        return;
+      }
+
+      const orig = deleteAllBtn.textContent;
+      deleteAllBtn.disabled = true;
+      deleteAllBtn.textContent = '🗑 deleting…';
+      try {
+        const r = await fetch('/api/projects', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.success) {
+          const errCount = (j.errors || []).length;
+          const msg = errCount > 0
+            ? `Deleted ${j.deleted} project(s); ${errCount} error(s).`
+            : `Deleted ${j.deleted} project(s).`;
+          showToast(msg, errCount > 0 ? 'warn' : 'success');
+          console.log('[ZAC-FIX] bulk delete:', j);
+          // Force a fresh stats fetch so the dashboard zeroes out
+          // (load + pollLive are the same handlers Refresh uses).
+          try { if (typeof load === 'function') load(); } catch (_) { /* ignore */ }
+          try { if (typeof pollLive === 'function') pollLive(); } catch (_) { /* ignore */ }
+        } else {
+          showToast('Bulk delete failed: ' + (j.error || ('HTTP ' + r.status)), 'error');
+        }
+      } catch (e) {
+        showToast('Bulk delete failed: ' + e.message, 'error');
+      } finally {
+        deleteAllBtn.disabled = false;
+        deleteAllBtn.textContent = orig;
+      }
+    });
+  }
+
   // collects fresh stats itself (we don't trust client-side cache for the
   // authoritative summary) and sends to the address configured in
   // Settings → Email. Falls open with a clear message if SMTP isn't set
