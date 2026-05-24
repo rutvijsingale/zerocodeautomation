@@ -4078,10 +4078,21 @@ async function selectProject(projectId) {
 async function createNewProject() {
   const name = prompt('Enter project name:');
   if (!name || name.trim() === '') return;
-  
+
   const description = prompt('Enter project description (optional):') || '';
   const baseUrl = prompt('Enter base URL (optional):') || 'http://localhost:3000';
-  
+
+  // [ZAC-FIX 2026-05-24] Inherit the currently-selected framework from
+  // the dropdown (which itself defaults to Settings → defaultFramework
+  // via app-init). Falls back to ZacSettings, then 'playwright-java'.
+  // Without this every new project was forced to 'playwright-java'
+  // even when the user had picked Selenium WebDriver in the dropdown,
+  // and the unsaved project's code panels would refresh to playwright
+  // on first selectProject call.
+  const fwDropdown = document.getElementById('framework')?.value;
+  const fwSettings = (window.ZacSettings && window.ZacSettings.get && window.ZacSettings.get().defaultFramework) || '';
+  const framework = fwDropdown || fwSettings || 'playwright-java';
+
   try {
     const response = await fetch('/api/projects', {
       method: 'POST',
@@ -4090,7 +4101,7 @@ async function createNewProject() {
         name: name.trim(),
         description,
         baseUrl,
-        framework: 'playwright-java',
+        framework,
         browserType: 'chromium'
       })
     });
