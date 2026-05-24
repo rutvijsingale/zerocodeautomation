@@ -868,7 +868,8 @@ function generatePlaywright(){
 // as the kept name (because renderCode + many call sites already
 // reference it) but now dispatches to the correct branch.
 function generateSelenium() {
-  const fw = document.getElementById('framework')?.value || 'playwright-java';
+  const fwRaw = document.getElementById('framework')?.value;
+  const fw = fwRaw || state.currentProjectFramework || 'playwright-java';
   switch (fw) {
     case 'selenium-java':
     case 'selenium-testng':
@@ -1136,8 +1137,169 @@ function generateFeature(){
   return lines.join('\n');
 }
 
-function generateStepDefs(){
-  return `import { Given, When, Then, And } from '@cucumber/cucumber';
+// [ZAC-FIX 2026-05-24] Framework-aware step-def preview dispatcher.
+// The previous hard-coded implementation always returned the Playwright
+// TypeScript template, even when the framework dropdown said
+// "Selenium WebDriver + Java + Cucumber". Now each framework gets a
+// minimal but framework-correct step-def preview. The full project-
+// grade output still happens server-side in /generate-files.
+function generateStepDefs() {
+  // Prefer the dropdown value, but fall back to the loaded project's
+  // framework when the dropdown is empty (some frameworks like
+  // playwright-typescript are uiVisible:false in /api/frameworks but
+  // are still valid project frameworks — without this fallback those
+  // projects show a default-branch step-def even though the project
+  // tells us exactly which variant to render).
+  const fwRaw = document.getElementById('framework')?.value;
+  const fw = fwRaw || state.currentProjectFramework || 'playwright-java';
+  switch (fw) {
+    case 'selenium-java':
+      return _generateSeleniumJavaStepDefs();
+    case 'selenium-testng':
+      return _generateSeleniumTestNgStepDefs();
+    case 'playwright-java':
+      return _generatePlaywrightJavaStepDefs();
+    case 'playwright-javascript':
+      return _generateCucumberJsStepDefs(false);
+    case 'playwright-typescript':
+      return _generateCucumberJsStepDefs(true);
+    default:
+      return _generateCucumberJsStepDefs(true);
+  }
+}
+
+function _generateSeleniumJavaStepDefs() {
+  return `package steps;
+
+import io.cucumber.java.en.Given;
+import io.cucumber.java.en.When;
+import io.cucumber.java.en.Then;
+import io.cucumber.java.en.And;
+import org.openqa.selenium.By;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
+import java.time.Duration;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class StepDefinitions {
+    private final WebDriver driver = SeleniumWorld.getDriver();
+    private final WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+
+    @Given("I navigate to {string}")
+    public void iNavigateTo(String url) { driver.get(url); }
+
+    @When("I click {string}")
+    public void iClick(String selector) {
+        wait.until(ExpectedConditions.elementToBeClickable(By.cssSelector(selector))).click();
+    }
+
+    @When("I type {string} into {string}")
+    public void iTypeInto(String value, String selector) {
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(selector))).sendKeys(value);
+    }
+
+    @Then("I should see {string} in {string}")
+    public void iShouldSeeIn(String text, String selector) {
+        String actual = driver.findElement(By.cssSelector(selector)).getText();
+        assertTrue(actual.contains(text), "Expected '" + text + "' in '" + actual + "'");
+    }
+
+    @Then("{string} should be visible")
+    public void shouldBeVisible(String selector) {
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(selector)));
+    }
+
+    @And("I wait for {int} ms")
+    public void iWaitForMs(Integer ms) throws InterruptedException { Thread.sleep(ms); }
+}
+`;
+}
+
+function _generateSeleniumTestNgStepDefs() {
+  // TestNG doesn't use Cucumber by default; its "test runner" is the @Test
+  // method itself. Show a TestNG class that maps recorded steps to
+  // discrete @Test methods (matches generators/selenium-testng.js output).
+  return `package tests;
+
+import org.openqa.selenium.By;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
+import org.testng.Assert;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
+import io.github.bonigarcia.wdm.WebDriverManager;
+import org.openqa.selenium.chrome.ChromeDriver;
+import java.time.Duration;
+
+public class RecordedTest {
+    private WebDriver driver;
+    private WebDriverWait wait;
+
+    @BeforeMethod
+    public void setUp() {
+        WebDriverManager.chromedriver().setup();
+        driver = new ChromeDriver();
+        wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+    }
+
+    @Test(description = "Recorded flow")
+    public void testRecordedFlow() {
+        driver.get("https://example.com");
+        wait.until(ExpectedConditions.elementToBeClickable(By.cssSelector("#submit"))).click();
+        // type / assertions follow the same pattern
+    }
+
+    @AfterMethod
+    public void tearDown() { if (driver != null) driver.quit(); }
+}
+`;
+}
+
+function _generatePlaywrightJavaStepDefs() {
+  return `package steps;
+
+import io.cucumber.java.en.Given;
+import io.cucumber.java.en.When;
+import io.cucumber.java.en.Then;
+import io.cucumber.java.en.And;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.assertions.PlaywrightAssertions;
+
+public class StepDefinitions {
+    private final Page page = PlaywrightWorld.getPage();
+
+    @Given("I navigate to {string}")
+    public void iNavigateTo(String url) { page.navigate(url); }
+
+    @When("I click {string}")
+    public void iClick(String selector) { page.click(selector); }
+
+    @When("I type {string} into {string}")
+    public void iTypeInto(String value, String selector) { page.fill(selector, value); }
+
+    @Then("I should see {string} in {string}")
+    public void iShouldSeeIn(String text, String selector) {
+        PlaywrightAssertions.assertThat(page.locator(selector)).containsText(text);
+    }
+
+    @Then("{string} should be visible")
+    public void shouldBeVisible(String selector) {
+        PlaywrightAssertions.assertThat(page.locator(selector)).isVisible();
+    }
+
+    @And("I wait for {int} ms")
+    public void iWaitForMs(Integer ms) { page.waitForTimeout(ms); }
+}
+`;
+}
+
+function _generateCucumberJsStepDefs(isTs) {
+  // The full TypeScript template (kept as-is for backwards compat with
+  // anyone copy-pasting from this panel). The JS variant strips types.
+  const ts = `import { Given, When, Then, And } from '@cucumber/cucumber';
 import { expect } from '@playwright/test';
 import { PlaywrightWorld } from '../support/world';
 
@@ -1283,6 +1445,18 @@ And('I call API POST {string}', async function(this: PlaywrightWorld, url: strin
   const resp = await this.page.request.post(url);
   this.lastResponse = resp;
 });`;
+  if (isTs) return ts;
+  // Strip TypeScript artifacts for the JS variant: `(this: PlaywrightWorld, x: type)`
+  // → `(x)`. We avoid full TS parsing — these are well-known shapes from the
+  // template above.
+  return ts
+    .replace(/import \{ expect \} from '@playwright\/test';\s*\n/g, "const { expect } = require('expect');\n")
+    .replace(/import \{ Given, When, Then, And \} from '@cucumber\/cucumber';/, "const { Given, When, Then, And } = require('@cucumber/cucumber');")
+    .replace(/import \{ PlaywrightWorld \} from '\.\.\/support\/world';\s*\n/g, "")
+    .replace(/this: PlaywrightWorld(?:,\s*)?/g, '')
+    .replace(/:\s*string/g, '')
+    .replace(/:\s*number/g, '')
+    .replace(/:\s*PlaywrightWorld/g, '');
 }
 
 function renderCode(){
@@ -1290,16 +1464,23 @@ function renderCode(){
   const isRecording = state.recording.active;
 
   // [ZAC-FIX 2026-05-24] Detect framework switch — when the framework
-  // dropdown changes, we MUST overwrite the code panels with the
-  // newly-generated framework-specific code, even if the user had
-  // edits. Without this the user picks "Selenium WebDriver + Java +
-  // Cucumber" and sees stale Playwright Java code. We track the
-  // framework that produced the current panel content; if it differs
-  // we treat the editors as "needs full refresh" (same code path as
-  // an empty editor).
+  // dropdown changes (or a project with a different framework loads)
+  // we MUST overwrite the code panels with newly-generated framework-
+  // specific code, even if the user had edits. Without this the user
+  // picks "Selenium WebDriver + Java + Cucumber" and sees stale
+  // Playwright Java code.
+  //
+  // Two trigger paths:
+  //   (a) framework value differs from what we last rendered, OR
+  //   (b) state.forceCodeRefresh is set (project-load sets this so
+  //       a project switch always refreshes, even when both projects
+  //       happen to use the same framework — their step text differs).
   const currentFramework = document.getElementById('framework')?.value || 'playwright-java';
-  const frameworkChanged = state.lastRenderedFramework && state.lastRenderedFramework !== currentFramework;
+  const frameworkChanged =
+    !!state.forceCodeRefresh ||
+    (state.lastRenderedFramework && state.lastRenderedFramework !== currentFramework);
   state.lastRenderedFramework = currentFramework;
+  if (state.forceCodeRefresh) state.forceCodeRefresh = false;   // consume the flag
 
   // Generate code (with caching during recording)
   let seleniumCode, featureCode, stepsCode;
@@ -3795,12 +3976,22 @@ async function selectProject(projectId) {
       // zacFixes.js can warn the user before they switch dropdowns.
       state.currentProjectFramework = data.project.framework || frameworkSelect?.value || null;
 
-      // [ZAC-FIX 2026-05-24] Resetting lastRenderedFramework forces
-      // the next renderCode() to refresh code panels with the loaded
-      // project's framework — without this, opening project A
-      // (selenium-java) right after viewing project B (playwright-java)
-      // could leave Playwright code in the panel.
-      state.lastRenderedFramework = null;
+      // [ZAC-FIX 2026-05-24] Force the next renderCode() to refresh
+      // panels — but ONLY when this project has no saved manual code.
+      // If the user previously hand-edited the step-defs / code panels,
+      // those are stored in project.manualCode and restored a few
+      // lines below. Force-refreshing would overwrite them. So:
+      //   - no manualCode  → regenerate from framework + state.steps
+      //   - has manualCode → leave it alone, user's edits win
+      const mc = data.project.manualCode || null;
+      const hasManualSteps = !!(mc && typeof mc.steps === 'string' && mc.steps.trim());
+      const hasManualPages = !!(mc && typeof mc.pages === 'string' && mc.pages.trim());
+      // forceCodeRefresh is consumed (set false) by renderCode after
+      // it runs; this means each project-load either regenerates from
+      // framework+steps or restores manualCode, never both.
+      // If EITHER manual edit exists, preserve the loaded project's
+      // saved content; otherwise regenerate.
+      state.forceCodeRefresh = !(hasManualSteps || hasManualPages);
 
       // [ZAC-FIX] FIX E — restore pinned framework version.
       const fwVersionSelect = document.getElementById('frameworkVersion');
@@ -3833,6 +4024,15 @@ async function selectProject(projectId) {
         setIfPresent('code-steps', mc.steps);
         setIfPresent('code-steps-overlay', mc.steps);
         setIfPresent('code-selenium', mc.pages);
+        // [ZAC-FIX 2026-05-24] Anchor lastRenderedFramework to the loaded
+        // project's framework AFTER restoring manualCode. Without this,
+        // the next renderCode() sees `lastRenderedFramework` from the
+        // previously-displayed project (e.g. 'playwright-java') vs the
+        // newly-loaded project's framework (e.g. 'selenium-java') and
+        // treats it as a framework switch — which overwrites the manual
+        // code we just restored.
+        const newFw = data.project.framework || frameworkSelect?.value || null;
+        if (newFw) state.lastRenderedFramework = newFw;
         console.log('[ZAC-FIX] FIX A: restored manual edits for project', data.project.id, '(', (mc.editedKeys || []).join(','), ')');
       }
       
