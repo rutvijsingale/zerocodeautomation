@@ -133,29 +133,117 @@
   }
 
   // ── Artifact links bar ───────────────────────────────────────
+  // [ZAC-FIX 2026-05-24] The old version linked to bare directories
+  // (/reports/<path>/screenshots/) which 404'd because
+  // express.static is mounted with index:false (no directory
+  // listing). Now we hit /api/dashboard/list-files which enumerates
+  // each subdir's files, and render direct per-file links so EVERY
+  // link actually opens.
   const links = document.getElementById('artifactLinks');
-  for (const [label, sub] of [
-    ['replay-result.json', '/replay-result.json'],
-    ['report/',            '/report/'],
-    ['screenshots/',       '/screenshots/'],
-    ['videos/',            '/videos/'],
-    ['traces/',            '/traces/'],
-    ['logs/',              '/logs/'],
-  ]) {
-    links.appendChild(el('a', {
-      class: 'file-link',
-      href: `/reports/${path}${sub}`,
-      target: '_blank',
-      rel: 'noopener',
-    }, label));
+  // Always show the JSON link first — it's the only top-level file
+  // and serves as a stable link even if the API is unreachable.
+  links.appendChild(el('a', {
+    class: 'file-link',
+    href: `/reports/${path}/replay-result.json`,
+    target: '_blank',
+    rel: 'noopener',
+  }, 'replay-result.json'));
+
+  function fmtBytes(n) {
+    if (!Number.isFinite(n) || n <= 0) return '';
+    if (n < 1024)        return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1024 / 1024).toFixed(1) + ' MB';
   }
 
-  // ── Try to auto-render screenshot + video files via static listing.
-  // Browsers don't support directory listing of /reports/...,
-  // so instead we attempt a small set of conventional names and
-  // fall back to the link bar above. The key UX: clicking any of
-  // the link-bar entries gets the raw asset.
-  ['screenshotsHost', 'videosHost'].forEach((id) => {
-    document.getElementById(id).appendChild(el('div', { class: 'empty' },
-      'Use the artifact-link buttons above to browse files in a new tab.'));
-  });
+  fetch(`/api/dashboard/list-files?path=${encodeURIComponent(path)}`)
+    .then((r) => r.ok ? r.json() : { ok: false })
+    .then((data) => {
+      if (!data || !data.ok) return;
+
+      // Promote the rendered HTML report (if present) to a top-of-bar pill —
+      // this is what most users actually want when they click "report/".
+      if (data.htmlReport) {
+        const a = el('a', {
+          class: 'file-link',
+          href: data.htmlReport.url,
+          target: '_blank',
+          rel: 'noopener',
+          title: 'self-contained HTML report (' + fmtBytes(data.htmlReport.bytes) + ')',
+          style: 'background:rgba(16,185,129,0.18);border-color:rgba(16,185,129,0.45);color:#10b981;',
+        }, '📊 report/index.html');
+        links.appendChild(a);
+      }
+
+      // Per-section file pills. Empty sections render a muted placeholder
+      // so users can see "no screenshots in this run" instead of clicking
+      // a broken directory link.
+      for (const [sectionLabel, files] of [
+        ['report',      data.report],
+        ['screenshots', data.screenshots],
+        ['videos',      data.videos],
+        ['traces',      data.traces],
+        ['logs',        data.logs],
+      ]) {
+        if (!files || files.length === 0) {
+          links.appendChild(el('span', {
+            class: 'file-link',
+            style: 'opacity:0.4;cursor:default;',
+            title: 'no files in this section for this rerun',
+          }, `${sectionLabel}/ — none`));
+          continue;
+        }
+        for (const f of files) {
+          links.appendChild(el('a', {
+            class: 'file-link',
+            href: f.url,
+            target: '_blank',
+            rel: 'noopener',
+            title: `${sectionLabel}/${f.name} — ${fmtBytes(f.bytes)}`,
+          }, `${sectionLabel}/${f.name}`));
+        }
+      }
+
+      // Inline gallery: render screenshots + videos directly so users
+      // don't need to open them one-by-one.
+      const sHost = document.getElementById('screenshotsHost');
+      sHost.innerHTML = '';
+      if (data.screenshots.length === 0) {
+        sHost.appendChild(el('div', { class: 'empty' }, 'no screenshots captured for this rerun'));
+      } else {
+        for (const f of data.screenshots) {
+          const fig = el('figure', { style: 'margin:8px 12px 8px 0;display:inline-block;vertical-align:top;' });
+          fig.appendChild(el('img', {
+            src: f.url,
+            alt: f.name,
+            style: 'max-width:240px;max-height:180px;border-radius:6px;display:block;',
+          }));
+          fig.appendChild(el('figcaption', { style: 'font-family:monospace;font-size:11px;color:var(--muted);margin-top:4px;' }, f.name));
+          sHost.appendChild(fig);
+        }
+      }
+      const vHost = document.getElementById('videosHost');
+      vHost.innerHTML = '';
+      if (data.videos.length === 0) {
+        vHost.appendChild(el('div', { class: 'empty' }, 'no videos captured for this rerun'));
+      } else {
+        for (const f of data.videos) {
+          const fig = el('figure', { style: 'margin:8px 12px 8px 0;display:inline-block;vertical-align:top;' });
+          const v = el('video', {
+            src: f.url,
+            controls: '',
+            style: 'max-width:320px;max-height:240px;border-radius:6px;display:block;background:#000;',
+          });
+          fig.appendChild(v);
+          fig.appendChild(el('figcaption', { style: 'font-family:monospace;font-size:11px;color:var(--muted);margin-top:4px;' }, f.name));
+          vHost.appendChild(fig);
+        }
+      }
+    })
+    .catch(() => {
+      // Falls open: the JSON link above still works without this endpoint.
+      const sHost = document.getElementById('screenshotsHost');
+      const vHost = document.getElementById('videosHost');
+      sHost.appendChild(el('div', { class: 'empty' }, 'Could not load artifact list. The replay-result.json link above still works.'));
+      vHost.appendChild(el('div', { class: 'empty' }, 'Could not load artifact list. The replay-result.json link above still works.'));
+    });

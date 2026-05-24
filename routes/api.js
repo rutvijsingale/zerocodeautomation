@@ -5553,6 +5553,77 @@ router.get('/dashboard/live', asyncHandler(async (req, res) => {
 // Query: ?path=<fw>/<project>/reruns/<test>/<timestamp>
 // Headers force a download; the file embeds all CSS so it works offline
 // and prints cleanly to PDF (File → Print → Save as PDF).
+// [ZAC-FIX 2026-05-24] List the artefacts (files in each subdir)
+// produced for one rerun so the report.html page can render real
+// per-file links instead of broken directory-listing links.
+//
+// /reports/<path> serves files via express.static({index:false}),
+// which intentionally returns 404 on a bare directory. Without
+// this endpoint the user sees broken links for report/, screenshots/,
+// videos/, traces/, logs/.
+//
+// Response shape:
+//   {
+//     ok: true,
+//     replayResult: { url, bytes },              // top-level
+//     htmlReport:   { url, bytes } | null,       // report/index.html
+//     report:       Array<{ name, url, bytes }>, // report/* (excl. index.html)
+//     screenshots:  Array<{ name, url, bytes }>,
+//     videos:       Array<{ name, url, bytes }>,
+//     traces:       Array<{ name, url, bytes }>,
+//     logs:         Array<{ name, url, bytes }>,
+//   }
+router.get('/dashboard/list-files', asyncHandler(async (req, res) => {
+  const reportPath = String(req.query.path || '');
+  if (!reportPath) return res.status(400).json({ ok: false, error: 'Missing ?path=' });
+  const fsp = await import('fs/promises');
+  const pathLib = await import('path');
+  const { decodeReportPath } = await import('../services/reportRenderer.js');
+  let parts;
+  try {
+    parts = decodeReportPath(reportPath, pathLib.resolve('generated-projects'));
+  } catch (e) {
+    return res.status(400).json({ ok: false, error: `Bad path: ${e.message}` });
+  }
+  const rerunRoot = pathLib.dirname(parts.replayResultPath);
+  async function listDir(name) {
+    try {
+      const dir = pathLib.join(rerunRoot, name);
+      const entries = await fsp.readdir(dir, { withFileTypes: true });
+      const out = [];
+      for (const e of entries) {
+        if (!e.isFile()) continue;
+        const stat = await fsp.stat(pathLib.join(dir, e.name)).catch(() => ({ size: 0 }));
+        out.push({
+          name: e.name,
+          url: `/reports/${reportPath}/${name}/${encodeURIComponent(e.name)}`,
+          bytes: stat.size,
+        });
+      }
+      return out.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (_) { return []; }
+  }
+  const [reportFiles, screenshots, videos, traces, logs] = await Promise.all([
+    listDir('report'), listDir('screenshots'), listDir('videos'), listDir('traces'), listDir('logs'),
+  ]);
+  // Promote the rendered HTML report (if present) to a top-level field.
+  const htmlIdx = reportFiles.findIndex(f => f.name === 'index.html');
+  let htmlReport = null;
+  if (htmlIdx >= 0) {
+    htmlReport = reportFiles[htmlIdx];
+    reportFiles.splice(htmlIdx, 1);
+  }
+  let replayBytes = 0;
+  try { replayBytes = (await fsp.stat(parts.replayResultPath)).size; } catch (_) {}
+  res.json({
+    ok: true,
+    replayResult: { url: `/reports/${reportPath}/replay-result.json`, bytes: replayBytes },
+    htmlReport,
+    report: reportFiles,
+    screenshots, videos, traces, logs,
+  });
+}));
+
 router.get('/dashboard/report/html', asyncHandler(async (req, res) => {
   const reportPath = String(req.query.path || '');
   if (!reportPath) return res.status(400).send('Missing ?path=<framework>/<project>/reruns/<test>/<timestamp>');
