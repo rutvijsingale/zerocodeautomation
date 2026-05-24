@@ -57,6 +57,41 @@ function resolveStepValue(step, fieldName = 'value') {
 }
 
 /**
+ * [ZAC-FIX 2026-05-24] iframe-aware locator root.
+ *
+ * Returns the root that subsequent `.locator(...)` calls should hang off of:
+ *   - if the step itself names an iframe (`frameSelector` from the recording
+ *     engine, or alias fields `frame` / `iframe` when set to a string), use
+ *     `page.frameLocator(<that>)`;
+ *   - else if a previous `switchToFrame` step set `page.__zacActiveFrame`,
+ *     use that frame;
+ *   - else operate at top level on `page`.
+ *
+ * The returned object exposes `.locator(sel)` in both Page and FrameLocator
+ * variants, which is all the healer + assertion paths need.
+ */
+function getStepRoot(page, step) {
+  const fromStep =
+    (typeof step.frameSelector === 'string' && step.frameSelector) ||
+    (typeof step.frame === 'string' && step.frame) ||
+    (typeof step.iframe === 'string' && step.iframe) ||
+    null;
+  if (fromStep) return page.frameLocator(fromStep);
+  if (page.__zacActiveFrame) return page.frameLocator(page.__zacActiveFrame);
+  return page;
+}
+
+/**
+ * Helper to detect if a root is a Page (top-level) or a FrameLocator. Some
+ * Playwright APIs (page.url, page.waitForURL, page.click, page.fill, …) only
+ * exist on Page; for FrameLocator we always go through `.locator(sel)`.
+ */
+function isFrameRoot(root) {
+  // Page objects expose `.goto`; FrameLocator does not.
+  return !root || typeof root.goto !== 'function';
+}
+
+/**
  * Execute a single step using Playwright.
  *
  * Returns an optional metadata object `{ healed, primarySelector, healedVia, attempts }`
@@ -148,17 +183,25 @@ export async function executePlaywrightStep(page, step, context = null) {
       }
       break;
 
-    case 'click':
-      // Detect if click causes navigation (pagination, links, etc.)
+    case 'click': {
+      const clickRoot = getStepRoot(page, step);
+      const inFrame = isFrameRoot(clickRoot);
+      // Top-level navigation detection only makes sense at top level —
+      // an iframe click won't change `page.url()`.
       const urlBeforeClick = page.url();
-      const navigationPromise = page.waitForURL('**', { timeout: 5000 }).catch(() => null);
+      const navigationPromise = inFrame
+        ? Promise.resolve(null)
+        : page.waitForURL('**', { timeout: 5000 }).catch(() => null);
 
       // Heal first: pick whichever selector in the recorded chain is
-      // currently visible, so the click survives a UI redesign.
-      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
+      // currently visible, so the click survives a UI redesign. The
+      // healer accepts either a Page or a FrameLocator — both expose
+      // `.locator(sel)`.
+      healInfo = await findElementWithHealing(clickRoot, step, { state: 'visible' });
 
       // Perform the click against the healed (or original) selector.
-      await page.click(healInfo.selector, { timeout: 10000 });
+      // Going through `.locator(sel).click()` works for both roots.
+      await clickRoot.locator(healInfo.selector).click({ timeout: 10000 });
       
       // Wait for potential navigation to start
       await page.waitForTimeout(200);
@@ -193,22 +236,27 @@ export async function executePlaywrightStep(page, step, context = null) {
         }
       }
       break;
+    }
 
-    case 'doubleClick':
-      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
-      await page.dblclick(healInfo.selector, { timeout: 10000 });
+    case 'doubleClick': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'visible' });
+      await root.locator(healInfo.selector).dblclick({ timeout: 10000 });
       await page.waitForTimeout(300);
       break;
+    }
 
     case 'type':
     case 'fill': { // [ZAC-FIX] alias — Playwright API uses .fill(); QA naturally
                    //              writes step.kind = 'fill'. Treat both identically
                    //              so a recorded "type" and a hand-written "fill"
                    //              produce the same Playwright behaviour.
-      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'visible' });
       const { resolved: typedValue, wasPlaceholder } = resolveStepValue(step, 'value');
-      await page.fill(healInfo.selector, '', { timeout: 10000 });
-      await page.fill(healInfo.selector, typedValue || '', { timeout: 10000 });
+      const fillLoc = root.locator(healInfo.selector);
+      await fillLoc.fill('', { timeout: 10000 });
+      await fillLoc.fill(typedValue || '', { timeout: 10000 });
       // Mask the resolved value in logs when it came from a credential placeholder.
       const safeForLog = wasPlaceholder ? maskSecret(typedValue) : (typedValue || '');
       console.log(`[Step:${step.kind}] ${healInfo.selector} ← ${safeForLog} (${(typedValue || '').length} chars)`);
@@ -217,33 +265,40 @@ export async function executePlaywrightStep(page, step, context = null) {
     }
 
     case 'select': {
-      healInfo = await findElementWithHealing(page, step, { state: 'attached' });
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'attached' });
       const rawSel = step.value || step.selectedText || '';
       const selValue = resolveCredentialPlaceholders(rawSel, {
         context: `step.value for ${healInfo.selector}`,
       });
-      await page.selectOption(healInfo.selector, selValue || '', { timeout: 10000 });
+      await root.locator(healInfo.selector).selectOption(selValue || '', { timeout: 10000 });
       await page.waitForTimeout(300);
       break;
     }
 
-    case 'check':
-      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
-      await page.check(healInfo.selector, { timeout: 10000 });
+    case 'check': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'visible' });
+      await root.locator(healInfo.selector).check({ timeout: 10000 });
       await page.waitForTimeout(200);
       break;
+    }
 
-    case 'uncheck':
-      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
-      await page.uncheck(healInfo.selector, { timeout: 10000 });
+    case 'uncheck': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'visible' });
+      await root.locator(healInfo.selector).uncheck({ timeout: 10000 });
       await page.waitForTimeout(200);
       break;
+    }
 
-    case 'hover':
-      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
-      await page.hover(healInfo.selector, { timeout: 10000 });
+    case 'hover': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'visible' });
+      await root.locator(healInfo.selector).hover({ timeout: 10000 });
       await page.waitForTimeout(200);
       break;
+    }
 
     case 'keyPress':
       const key = step.key || step.value || 'Enter';
@@ -251,18 +306,56 @@ export async function executePlaywrightStep(page, step, context = null) {
       await page.waitForTimeout(200);
       break;
 
+    // [ZAC-FIX 2026-05-24] Explicit frame switching for the demoqa.com/frames
+    // and similar iframe-heavy flows. After `switchToFrame`, all subsequent
+    // steps that don't carry their own `frameSelector` resolve through the
+    // active frame. `switchToParentFrame` (also `switchToDefault`) clears it.
+    case 'switchToFrame': {
+      const fs =
+        step.frameSelector ||
+        (typeof step.frame === 'string' ? step.frame : null) ||
+        (typeof step.iframe === 'string' ? step.iframe : null) ||
+        step.selector;
+      if (!fs) {
+        throw new Error('switchToFrame requires frameSelector / frame / iframe / selector');
+      }
+      // Validate the frame exists (else later steps would fail with confusing
+      // "no element" errors).
+      try {
+        await page.locator(fs).first().waitFor({ state: 'attached', timeout: step.timeoutMs || 10000 });
+      } catch (_e) {
+        throw new Error(`switchToFrame: iframe "${fs}" not found`);
+      }
+      page.__zacActiveFrame = fs;
+      console.log(`[Frame] switched to ${fs}`);
+      break;
+    }
+    case 'switchToParentFrame':
+    case 'switchToDefault':
+    case 'switchToTop': {
+      page.__zacActiveFrame = null;
+      console.log('[Frame] switched back to top-level page');
+      break;
+    }
+
     case 'waitFor':
       await page.waitForTimeout(Number(step.ms) || 500);
       break;
 
-    case 'waitForSelector':
-      healInfo = await findElementWithHealing(page, step, { state: 'attached' });
-      await page.waitForSelector(healInfo.selector, { timeout: 10000 });
+    case 'waitForSelector': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'attached' });
+      // FrameLocator has no waitForSelector; use the locator's wait API,
+      // which works for both Page and FrameLocator roots.
+      await root.locator(healInfo.selector).first()
+        .waitFor({ state: 'attached', timeout: step.timeoutMs || 10000 });
       break;
+    }
 
-    case 'assertText':
-      healInfo = await findElementWithHealing(page, step, { state: 'attached' });
-      const text = await page.textContent(healInfo.selector);
+    case 'assertText': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'attached' });
+      const text = await root.locator(healInfo.selector).textContent();
       const expectedText = step.expectedValue || step.text || '';
       if (!text || !text.includes(expectedText)) {
         // T3.13 — assertion repair. The element exists but its text
@@ -303,11 +396,15 @@ export async function executePlaywrightStep(page, step, context = null) {
         throw new Error(`Expected text "${expectedText}" not found. Found: "${text}"`);
       }
       break;
+    }
 
-    case 'assertVisible':
-      healInfo = await findElementWithHealing(page, step, { state: 'visible' });
-      await page.waitForSelector(healInfo.selector, { state: 'visible', timeout: 10000 });
+    case 'assertVisible': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'visible' });
+      await root.locator(healInfo.selector).first()
+        .waitFor({ state: 'visible', timeout: step.timeoutMs || 10000 });
       break;
+    }
 
     case 'assertAttribute': {
       // [ZAC-FIX 2026-05-24] The recorder + every codegen writes the
@@ -315,17 +412,19 @@ export async function executePlaywrightStep(page, step, context = null) {
       // use step.attribute / step.attributeName which is much clearer.
       // Accept all three so the rerun engine matches every other layer.
       // The expected value lives in step.expectedValue.
+      const root = getStepRoot(page, step);
       const attrName = step.attribute || step.attributeName || step.value || 'value';
       const expectedAttr = step.expectedValue !== undefined ? String(step.expectedValue) : '';
-      healInfo = await findElementWithHealing(page, step, { state: 'attached' });
-      const attrValue = await page.getAttribute(healInfo.selector, attrName);
+      healInfo = await findElementWithHealing(root, step, { state: 'attached' });
+      const targetLoc = root.locator(healInfo.selector);
+      const attrValue = await targetLoc.getAttribute(attrName);
       // For form fields, getAttribute('value') returns the *initial* HTML
       // attribute, not the current input value (which is the .value DOM
       // property and changes after typing). When users assert against
       // 'value', read the live property so the assertion matches what the
       // user types in.
       const live = (attrName === 'value')
-        ? await page.locator(healInfo.selector).inputValue().catch(() => null)
+        ? await targetLoc.inputValue().catch(() => null)
         : null;
       const actual = (live !== null && live !== undefined) ? live : attrValue;
       if (String(actual) !== expectedAttr) {
