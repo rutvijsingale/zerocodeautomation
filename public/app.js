@@ -861,7 +861,103 @@ function generatePlaywright(){
   return lines.join('\n');
 }
 
-function generateSelenium(){
+// [ZAC-FIX 2026-05-24] Framework-aware code preview dispatcher.
+// Replaces the old hard-coded `generateSelenium()` that always emitted
+// Selenium Java even when the user picked Playwright. Each framework
+// gets its own preview generator below; generateSelenium() is kept
+// as the kept name (because renderCode + many call sites already
+// reference it) but now dispatches to the correct branch.
+function generateSelenium() {
+  const fw = document.getElementById('framework')?.value || 'playwright-java';
+  switch (fw) {
+    case 'selenium-java':
+    case 'selenium-testng':
+      return _generateSeleniumJavaCode(fw);
+    case 'playwright-java':
+      return _generatePlaywrightJavaCode();
+    case 'playwright-javascript':
+      return _generatePlaywrightJsCode(false);
+    case 'playwright-typescript':
+      return _generatePlaywrightJsCode(true);
+    default:
+      return _generateSeleniumJavaCode('selenium-java');
+  }
+}
+
+// ── Playwright Java preview ────────────────────────────────────────
+function _generatePlaywrightJavaCode() {
+  const baseUrl = document.getElementById('baseUrl')?.value || 'about:blank';
+  const browserType = document.getElementById('browserType')?.value || 'chromium';
+  const title = (document.getElementById('featureTitle')?.value || 'Recorded').replace(/\s+/g, '');
+  const lines = [];
+  lines.push('package tests;');
+  lines.push('');
+  lines.push('import com.microsoft.playwright.*;');
+  lines.push('import org.junit.jupiter.api.*;');
+  lines.push('import static org.junit.jupiter.api.Assertions.*;');
+  lines.push('');
+  lines.push('public class ' + title + 'Test {');
+  lines.push('    private static Playwright playwright;');
+  lines.push('    private static Browser browser;');
+  lines.push('    private static BrowserContext context;');
+  lines.push('    private static Page page;');
+  lines.push('');
+  lines.push('    @BeforeAll public static void setUp() {');
+  lines.push('        playwright = Playwright.create();');
+  lines.push('        browser = playwright.' + browserType + '().launch(new BrowserType.LaunchOptions().setHeadless(false));');
+  lines.push('        context = browser.newContext();');
+  lines.push('        page = context.newPage();');
+  lines.push('    }');
+  lines.push('');
+  lines.push('    @Test public void testRecordedFlow() {');
+  lines.push('        page.navigate("' + baseUrl + '");');
+  for (const s of (state.steps || [])) {
+    if (s.kind === 'navigate' && s.url)         lines.push('        page.navigate("' + s.url + '");');
+    else if (s.kind === 'click' && s.selector)  lines.push('        page.click("' + s.selector.replace(/"/g, '\\"') + '");');
+    else if ((s.kind === 'type' || s.kind === 'fill') && s.selector)
+                                                lines.push('        page.fill("' + s.selector.replace(/"/g, '\\"') + '", "' + (s.value || '').replace(/"/g, '\\"') + '");');
+    else if (s.kind === 'waitFor' && s.ms)      lines.push('        page.waitForTimeout(' + s.ms + ');');
+    else if (s.kind === 'waitForSelector' && s.selector)
+                                                lines.push('        page.waitForSelector("' + s.selector.replace(/"/g, '\\"') + '");');
+  }
+  lines.push('    }');
+  lines.push('');
+  lines.push('    @AfterAll public static void tearDown() {');
+  lines.push('        if (context != null) context.close();');
+  lines.push('        if (browser != null) browser.close();');
+  lines.push('        if (playwright != null) playwright.close();');
+  lines.push('    }');
+  lines.push('}');
+  return lines.join('\n');
+}
+
+// ── Playwright JS / TS preview ─────────────────────────────────────
+function _generatePlaywrightJsCode(isTs) {
+  const baseUrl = document.getElementById('baseUrl')?.value || 'about:blank';
+  const lines = [];
+  if (isTs) {
+    lines.push("import { test, expect, Page } from '@playwright/test';");
+  } else {
+    lines.push("const { test, expect } = require('@playwright/test');");
+  }
+  lines.push('');
+  lines.push("test('recorded flow', async ({ page }" + (isTs ? ': { page: Page }' : '') + ") => {");
+  lines.push("  await page.goto('" + baseUrl + "');");
+  for (const s of (state.steps || [])) {
+    if (s.kind === 'navigate' && s.url)         lines.push("  await page.goto('" + s.url + "');");
+    else if (s.kind === 'click' && s.selector)  lines.push("  await page.click('" + s.selector.replace(/'/g, "\\'") + "');");
+    else if ((s.kind === 'type' || s.kind === 'fill') && s.selector)
+                                                lines.push("  await page.fill('" + s.selector.replace(/'/g, "\\'") + "', '" + (s.value || '').replace(/'/g, "\\'") + "');");
+    else if (s.kind === 'waitFor' && s.ms)      lines.push('  await page.waitForTimeout(' + s.ms + ');');
+    else if (s.kind === 'waitForSelector' && s.selector)
+                                                lines.push("  await page.waitForSelector('" + s.selector.replace(/'/g, "\\'") + "');");
+  }
+  lines.push('});');
+  return lines.join('\n');
+}
+
+// ── Selenium Java preview (covers selenium-java + selenium-testng) ──
+function _generateSeleniumJavaCode(fw) {
   const baseUrl = document.getElementById('baseUrl').value || 'http://example.com';
   const browserType = document.getElementById('browserType')?.value || 'chromium';
   const lines = [];
@@ -1192,7 +1288,19 @@ And('I call API POST {string}', async function(this: PlaywrightWorld, url: strin
 function renderCode(){
   // During recording, optimize by caching code generation and only updating when needed
   const isRecording = state.recording.active;
-  
+
+  // [ZAC-FIX 2026-05-24] Detect framework switch — when the framework
+  // dropdown changes, we MUST overwrite the code panels with the
+  // newly-generated framework-specific code, even if the user had
+  // edits. Without this the user picks "Selenium WebDriver + Java +
+  // Cucumber" and sees stale Playwright Java code. We track the
+  // framework that produced the current panel content; if it differs
+  // we treat the editors as "needs full refresh" (same code path as
+  // an empty editor).
+  const currentFramework = document.getElementById('framework')?.value || 'playwright-java';
+  const frameworkChanged = state.lastRenderedFramework && state.lastRenderedFramework !== currentFramework;
+  state.lastRenderedFramework = currentFramework;
+
   // Generate code (with caching during recording)
   let seleniumCode, featureCode, stepsCode;
   
@@ -1238,7 +1346,9 @@ function renderCode(){
       }
     } else {
       // When not recording: only update if empty (preserve user edits)
-      if (!seleniumEl.value || seleniumEl.value.trim() === '') {
+      // [ZAC-FIX 2026-05-24] OR if the framework just changed —
+      // user explicitly switched, the previous content is now wrong.
+      if (!seleniumEl.value || seleniumEl.value.trim() === '' || frameworkChanged) {
         seleniumEl.value = seleniumCode;
       }
     }
@@ -1323,8 +1433,12 @@ function renderCode(){
       }
     } else {
       // When not recording: update if empty OR if steps changed after recording (force update)
-      // Preserve user edits only if steps haven't changed
-      if (!state.currentProjectName || stepsEl.value === '' || stepsEl.value === stepsCode || state.stepsChangedAfterRecording) {
+      // Preserve user edits only if steps haven't changed.
+      // [ZAC-FIX 2026-05-24] Also force-update on framework switch —
+      // each framework emits totally different step-def syntax
+      // (Java + Cucumber vs JS + Cucumber vs TestNG vs …) and the
+      // old content is wrong for the new framework.
+      if (!state.currentProjectName || stepsEl.value === '' || stepsEl.value === stepsCode || state.stepsChangedAfterRecording || frameworkChanged) {
         stepsEl.value = stepsCode;
         addStepDefClickHandlers(stepsEl);
         // Reset flag after updating (already reset in Gherkin section, but ensure it's reset here too)
@@ -3681,6 +3795,13 @@ async function selectProject(projectId) {
       // zacFixes.js can warn the user before they switch dropdowns.
       state.currentProjectFramework = data.project.framework || frameworkSelect?.value || null;
 
+      // [ZAC-FIX 2026-05-24] Resetting lastRenderedFramework forces
+      // the next renderCode() to refresh code panels with the loaded
+      // project's framework — without this, opening project A
+      // (selenium-java) right after viewing project B (playwright-java)
+      // could leave Playwright code in the panel.
+      state.lastRenderedFramework = null;
+
       // [ZAC-FIX] FIX E — restore pinned framework version.
       const fwVersionSelect = document.getElementById('frameworkVersion');
       if (fwVersionSelect && data.project.frameworkVersion) {
@@ -4005,6 +4126,55 @@ async function loadFrameworkRegistry() {
 document.addEventListener('DOMContentLoaded', () => {
   loadConfig();
   loadFrameworkRegistry();
+
+  // [ZAC-FIX 2026-05-24] Wire framework dropdown to re-render code panels.
+  // Without this, switching from "Selenium WebDriver + Java + Cucumber"
+  // to "Playwright + Java + Cucumber" left the previous framework's code
+  // stuck in the Generated Code panel because renderCode() preserves
+  // user edits when not recording.
+  const frameworkSel = document.getElementById('framework');
+  if (frameworkSel) {
+    frameworkSel.addEventListener('change', (e) => {
+      const newFw = e.currentTarget.value;
+      // [ZAC-FIX 2026-05-24] Synthetic events (zacFixes.js applying the
+      // Settings default, project-load handlers programmatically setting
+      // the framework) carry isTrusted=false. Don't prompt the user in
+      // those paths — just refresh the panels silently. The confirm is
+      // only useful when a HUMAN clicks the dropdown.
+      const isUserEvent = e.isTrusted === true;
+      const seleniumEl = document.getElementById('code-selenium');
+      const stepsEl = document.getElementById('code-steps');
+      const hasUserContent = isUserEvent && (
+        (seleniumEl && seleniumEl.value && seleniumEl.value.trim().length > 50) ||
+        (stepsEl && stepsEl.value && stepsEl.value.trim().length > 50)
+      );
+      if (hasUserContent) {
+        const ok = window.confirm(
+          'Switching framework will regenerate the Selenium/Playwright code ' +
+          'and step definitions for "' + newFw + '". Any unsaved manual ' +
+          'edits in those panels will be replaced.\n\n' +
+          'Continue?'
+        );
+        if (!ok) {
+          // Roll back the dropdown to the previous framework so the
+          // panels and the dropdown stay in sync.
+          if (state.lastRenderedFramework) {
+            e.currentTarget.value = state.lastRenderedFramework;
+          }
+          return;
+        }
+      }
+      // Force renderCode() to overwrite (frameworkChanged will be true).
+      try { if (typeof renderCode === 'function') renderCode(); } catch (_) {}
+    });
+  }
+  // Also wire the step-defs sub-panel framework dropdown if present.
+  const stepDefsFwSel = document.getElementById('stepDefsFramework');
+  if (stepDefsFwSel) {
+    stepDefsFwSel.addEventListener('change', () => {
+      try { if (typeof renderCode === 'function') renderCode(); } catch (_) {}
+    });
+  }
 
   // T2.5 — viewport preset: show/hide the custom width/height row when
   // the user picks "Custom…", and wire its initial state on load.
