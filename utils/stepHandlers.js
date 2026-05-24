@@ -406,6 +406,99 @@ export async function executePlaywrightStep(page, step, context = null) {
       break;
     }
 
+    // [ZAC-FIX 2026-05-25] The following assertion kinds were in the
+    // recording allowlist (routes/api.js + routes/websocket.js) so the
+    // recorder accepts them and the codegen for every framework already
+    // emits the right line — but the live rerun engine was missing the
+    // execution branch and threw "Unknown step kind" at runtime. Adding
+    // them here closes the codegen-vs-rerun gap so the steps the IDE
+    // shows in the panel actually pass on rerun.
+    case 'assertNotVisible': {
+      const root = getStepRoot(page, step);
+      const sel = step.selector;
+      if (!sel) throw new Error('assertNotVisible requires a selector');
+      // Use `hidden` (covers display:none / visibility:hidden / detached);
+      // tolerate both "becomes hidden within timeout" and "already hidden".
+      try {
+        await root.locator(sel).first()
+          .waitFor({ state: 'hidden', timeout: step.timeoutMs || 10000 });
+      } catch (e) {
+        // Provide a clearer message if the element actually IS visible.
+        const visible = await root.locator(sel).first().isVisible().catch(() => false);
+        if (visible) throw new Error(`Expected "${sel}" to be hidden, but it is visible`);
+        // Otherwise the element didn't exist at all — that's a pass.
+      }
+      break;
+    }
+
+    case 'assertEnabled': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'attached' });
+      const enabled = await root.locator(healInfo.selector).first()
+        .isEnabled({ timeout: step.timeoutMs || 5000 });
+      if (!enabled) throw new Error(`Expected "${healInfo.selector}" to be enabled`);
+      break;
+    }
+
+    case 'assertDisabled': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'attached' });
+      const disabled = await root.locator(healInfo.selector).first()
+        .isDisabled({ timeout: step.timeoutMs || 5000 });
+      if (!disabled) throw new Error(`Expected "${healInfo.selector}" to be disabled`);
+      break;
+    }
+
+    case 'assertChecked': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'attached' });
+      const checked = await root.locator(healInfo.selector).first().isChecked();
+      if (!checked) throw new Error(`Expected "${healInfo.selector}" to be checked`);
+      break;
+    }
+
+    case 'assertNotChecked': {
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'attached' });
+      const checked = await root.locator(healInfo.selector).first().isChecked();
+      if (checked) throw new Error(`Expected "${healInfo.selector}" to NOT be checked`);
+      break;
+    }
+
+    case 'assertCount': {
+      const root = getStepRoot(page, step);
+      const sel = step.selector;
+      if (!sel) throw new Error('assertCount requires a selector');
+      const expected = Number(
+        step.expectedCount !== undefined ? step.expectedCount :
+        step.expectedValue !== undefined ? step.expectedValue :
+        step.count
+      );
+      if (!Number.isFinite(expected)) {
+        throw new Error('assertCount requires expectedCount/expectedValue/count (numeric)');
+      }
+      const actual = await root.locator(sel).count();
+      if (actual !== expected) {
+        throw new Error(`Expected count "${sel}" to be ${expected}, got ${actual}`);
+      }
+      break;
+    }
+
+    case 'assertValue': {
+      // Live form-field value (input/textarea/select). Different from
+      // assertAttribute('value', …) — that reads the initial HTML attr
+      // not the live DOM property.
+      const root = getStepRoot(page, step);
+      healInfo = await findElementWithHealing(root, step, { state: 'attached' });
+      const expected = step.expectedValue !== undefined ? String(step.expectedValue)
+                                                        : String(step.value || '');
+      const live = await root.locator(healInfo.selector).first().inputValue();
+      if (String(live) !== expected) {
+        throw new Error(`Expected value of "${healInfo.selector}" to be ${JSON.stringify(expected)}, got ${JSON.stringify(live)}`);
+      }
+      break;
+    }
+
     case 'assertAttribute': {
       // [ZAC-FIX 2026-05-24] The recorder + every codegen writes the
       // attribute name into step.value; newer callers (and the docs)
