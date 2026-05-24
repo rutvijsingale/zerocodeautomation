@@ -407,6 +407,10 @@
              generated code, reruns, screenshots — but NOT settings, email
              config, or AI/locator strategy. Confirms via a strict modal. -->
         <button class="btn danger" id="deleteAllProjectsBtn" title="Delete EVERY project (recordings + generated code + reruns). Settings and config are preserved.">🗑 Delete all projects</button>
+        <!-- [ZAC-FIX 2026-05-24] Clean orphan generated-projects/* dirs
+             (no matching project in projects/). Less destructive than
+             the bulk-delete above. -->
+        <button class="btn" id="cleanOrphansBtn" title="Remove generated-projects/<fw>/<id>/ folders whose <id> is no longer in projects/. Real projects + their reruns are preserved.">🧹 Clean orphans</button>
         <button class="btn primary" id="newRunBtn">+ New run</button>
       </div>
     </div>

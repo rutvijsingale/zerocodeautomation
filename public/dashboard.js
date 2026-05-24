@@ -1097,6 +1097,55 @@
     });
   }
 
+  // [ZAC-FIX 2026-05-24] Clean orphans button — removes
+  // generated-projects/<fw>/<id>/ dirs whose <id> isn't in projects/.
+  // Less destructive than bulk delete; ideal after harness runs leave
+  // clutter behind. Single confirmation (vs the two-step
+  // "Delete all projects" because nothing user-recorded is at stake).
+  const cleanOrphansBtn = document.getElementById('cleanOrphansBtn');
+  if (cleanOrphansBtn) {
+    cleanOrphansBtn.addEventListener('click', async () => {
+      const ok = window.confirm(
+        'Clean orphan generated-projects/* directories?\n\n' +
+        'This removes generated code + reruns for projects whose ' +
+        'project.json no longer exists in projects/. Real projects ' +
+        'and their reruns are NOT affected.'
+      );
+      if (!ok) return;
+      const orig = cleanOrphansBtn.textContent;
+      cleanOrphansBtn.disabled = true;
+      cleanOrphansBtn.textContent = '🧹 cleaning…';
+      try {
+        const r = await fetch('/api/dashboard/clean-orphans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.success) {
+          showToast(
+            j.removedCount === 0
+              ? 'No orphans to clean — disk is tidy.'
+              : `Cleaned ${j.removedCount} orphan director${j.removedCount === 1 ? 'y' : 'ies'}.`,
+            j.removedCount > 0 ? 'success' : 'info'
+          );
+          console.log('[ZAC-FIX] orphans cleaned:', j);
+          // Refresh dashboard so framework projection numbers drop
+          try { if (typeof load === 'function') load(); } catch (_) {}
+          try { if (typeof pollLive === 'function') pollLive(); } catch (_) {}
+          window.dispatchEvent(new CustomEvent('zac-runs:changed'));
+        } else {
+          showToast('Cleanup failed: ' + (j.error || ('HTTP ' + r.status)), 'error');
+        }
+      } catch (e) {
+        showToast('Cleanup failed: ' + e.message, 'error');
+      } finally {
+        cleanOrphansBtn.disabled = false;
+        cleanOrphansBtn.textContent = orig;
+      }
+    });
+  }
+
   // collects fresh stats itself (we don't trust client-side cache for the
   // authoritative summary) and sends to the address configured in
   // Settings → Email. Falls open with a clear message if SMTP isn't set

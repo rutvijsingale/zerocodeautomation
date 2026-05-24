@@ -4484,6 +4484,76 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
 // Body: { confirm: true } REQUIRED — guards against accidental fires
 // from misconfigured clients. Returns the list of deleted ids so the
 // UI can show "Deleted 7 project(s)".
+// [ZAC-FIX 2026-05-24] Sweep orphan generated-projects/* dirs.
+//
+// Over time, automated harnesses, abandoned recordings, and old bulk-delete
+// flows leave dirs under generated-projects/<fw>/<id>/ where <id> no
+// longer exists in projects/. The dashboard's Framework Projection panel
+// counts these (when "Include orphan projects" is on), inflating the
+// project count from "1 real project" to "66" — confusing.
+//
+// This endpoint walks every framework dir under generated-projects/ and
+// removes any sub-directory whose name does NOT match a current entry
+// in projects/<id>/. The single source of truth is projects/.
+//
+// Body: { confirm: true } REQUIRED — same safety contract as the bulk
+//       project-delete endpoint above. Returns the list of removed
+//       paths so the UI can show "Cleaned N orphan dir(s)".
+router.post('/dashboard/clean-orphans', strictRateLimiter, asyncHandler(async (req, res) => {
+  const confirm = req.body && (req.body.confirm === true || req.body.confirm === 'true');
+  if (!confirm) {
+    return res.status(400).json({
+      success: false,
+      error: 'Cleanup requires { "confirm": true } in the request body.',
+    });
+  }
+  try {
+    const fsp = await import('fs/promises');
+    const repoRoot = path.resolve('.');
+    const projectsRoot = path.join(repoRoot, 'projects');
+    const genRoot = path.join(repoRoot, 'generated-projects');
+    // Source of truth: every projects/<id>/ that exists.
+    const realIds = new Set(
+      (await fsp.readdir(projectsRoot, { withFileTypes: true }).catch(() => []))
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+    );
+    const frameworks = (await fsp.readdir(genRoot, { withFileTypes: true }).catch(() => []))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+    const removed = [];
+    const errors = [];
+    for (const fw of frameworks) {
+      const fwDir = path.join(genRoot, fw);
+      const projDirs = (await fsp.readdir(fwDir, { withFileTypes: true }).catch(() => []))
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+      for (const projId of projDirs) {
+        if (realIds.has(projId)) continue; // not orphan
+        const target = path.join(fwDir, projId);
+        try {
+          await fsp.rm(target, { recursive: true, force: true });
+          removed.push(`${fw}/${projId}`);
+        } catch (e) {
+          errors.push({ path: `${fw}/${projId}`, error: e.message });
+        }
+      }
+    }
+    console.log(`[API] /dashboard/clean-orphans removed ${removed.length} dir(s) (errors: ${errors.length})`);
+    res.json({
+      success: true,
+      removed,
+      errors,
+      removedCount: removed.length,
+      keptRealProjects: Array.from(realIds),
+      message: `Cleaned ${removed.length} orphan director${removed.length === 1 ? 'y' : 'ies'}.`,
+    });
+  } catch (e) {
+    console.error('[API] /dashboard/clean-orphans error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+}));
+
 router.delete('/projects', strictRateLimiter, asyncHandler(async (req, res) => {
   console.log('[API] DELETE /api/projects (bulk) - Request received');
   const confirm = req.body && (req.body.confirm === true || req.body.confirm === 'true');
