@@ -4532,12 +4532,39 @@ router.post('/dashboard/clean-orphans', strictRateLimiter, asyncHandler(async (r
     const repoRoot = path.resolve('.');
     const projectsRoot = path.join(repoRoot, 'projects');
     const genRoot = path.join(repoRoot, 'generated-projects');
-    // Source of truth: every projects/<id>/ that exists.
-    const realIds = new Set(
-      (await fsp.readdir(projectsRoot, { withFileTypes: true }).catch(() => []))
-        .filter((e) => e.isDirectory())
-        .map((e) => e.name)
-    );
+
+    // [ZAC-FIX 2026-05-24] Source of truth: a "real project" is a
+    // directory under projects/ that contains a project.json. The
+    // earlier dir-presence check treated stub dirs (left by failed
+    // saves or harness aborts) as real, which kept inflated counts
+    // in the Framework Projection panel even after the user deleted
+    // every project. The Recording-tab dropdown uses the same
+    // project.json check, so both surfaces now agree.
+    const projectDirs = (await fsp.readdir(projectsRoot, { withFileTypes: true }).catch(() => []))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+    const realIds = new Set();
+    const stubIds = [];
+    for (const id of projectDirs) {
+      try {
+        await fsp.access(path.join(projectsRoot, id, 'project.json'));
+        realIds.add(id);
+      } catch (_) {
+        stubIds.push(id);   // dir exists but no project.json — orphan stub
+      }
+    }
+    // Sweep the stub dirs themselves so subsequent reads of projects/
+    // are honest. Best-effort: a permission failure logs + continues.
+    const removedStubs = [];
+    for (const id of stubIds) {
+      try {
+        await fsp.rm(path.join(projectsRoot, id), { recursive: true, force: true });
+        removedStubs.push(`projects/${id}`);
+      } catch (e) {
+        console.warn('[API] /clean-orphans: could not remove stub projects/' + id + ':', e.message);
+      }
+    }
+
     const frameworks = (await fsp.readdir(genRoot, { withFileTypes: true }).catch(() => []))
       .filter((e) => e.isDirectory())
       .map((e) => e.name);
@@ -4583,15 +4610,19 @@ router.post('/dashboard/clean-orphans', strictRateLimiter, asyncHandler(async (r
       console.warn('[API] /dashboard/clean-orphans: log compaction failed:', e.message);
     }
 
-    console.log(`[API] /dashboard/clean-orphans removed ${removed.length} dir(s) + ${logCompacted.removed} log rows (errors: ${errors.length})`);
+    console.log(`[API] /dashboard/clean-orphans: removed ${removedStubs.length} project stub dir(s), ${removed.length} generated-projects mirror(s), ${logCompacted.removed} log rows (errors: ${errors.length})`);
+    const totalRemoved = removed.length + removedStubs.length;
     res.json({
       success: true,
       removed,
+      removedStubs,        // projects/<id>/ dirs that lacked project.json
       errors,
-      removedCount: removed.length,
+      removedCount: totalRemoved,
       historyCompacted: logCompacted,
       keptRealProjects: Array.from(realIds),
-      message: `Cleaned ${removed.length} orphan director${removed.length === 1 ? 'y' : 'ies'}` +
+      message:
+        `Cleaned ${removedStubs.length} stub project dir${removedStubs.length === 1 ? '' : 's'}` +
+        ` + ${removed.length} orphan generated-project mirror${removed.length === 1 ? '' : 's'}` +
         (logCompacted.removed ? ` + ${logCompacted.removed} stale history row${logCompacted.removed === 1 ? '' : 's'}` : '') + '.',
     });
   } catch (e) {
