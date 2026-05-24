@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -34,6 +35,18 @@ const wsInstance = expressWs(app);
 
 // Middleware setup
 app.use(helmet(securityHeaders));
+// [ZAC-FIX 2026-05-24] gzip/br responses (text/* + application/json
+// + JS/CSS/HTML) — drops the recording UI's ~400KB JS payload to
+// ~80KB on the wire. Filter excludes WebSocket and any caller that
+// asks for `Cache-Control: no-transform`. Threshold 1KB so we don't
+// pay CPU on tiny health-check responses.
+app.use(compression({
+  threshold: 1024,
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  },
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(requestLogger);
@@ -169,7 +182,25 @@ app.get('/SCENARIO_OUTLINE_GUIDE.md', async (req, res) => {
 });
 
 // Static file serving for public directory (frontend)
-app.use(express.static('public'));
+// [ZAC-FIX 2026-05-24] Tighter cache strategy:
+//   - HTML is always served fresh (max-age=0) so the latest version
+//     of the app shell is delivered on every navigation.
+//   - JS/CSS use a 5-min cache because the HTML loads them with a
+//     ?v=<bust> query string. ETag still wins on revalidation; this
+//     just removes the round-trip when the browser already has the
+//     bytes. On a slow corporate network this is the single biggest
+//     "tool feels slow" win after gzip.
+app.use(express.static('public', {
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    } else if (/\.(js|css|svg|woff2?|ttf|otf)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=86400');
+    }
+  },
+}));
 
 // Routes
 app.use('/api', apiRoutes);
