@@ -1455,6 +1455,23 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
             projectId: scaffold.project.projectName,
             testName: scaffold.testName,
           });
+          // [ZAC-FIX 2026-05-31] Also write Allure results so users can
+          //     allure serve <rerunDir>/allure-results
+          // No-op if it fails — the canonical replay-result.json is
+          // always the source of truth.
+          let allureResultsDir = null;
+          try {
+            const { writeAllureResults } = await import('../utils/allureWriter.js');
+            allureResultsDir = await writeAllureResults({
+              rerunDir: scaffold.rerunDir,
+              replayPayload,
+              framework: scaffold.project.framework,
+              projectId: scaffold.project.projectName,
+              testName: scaffold.testName,
+            });
+          } catch (allureErr) {
+            console.warn('[Rerun] Allure writer crashed (non-fatal):', allureErr.message);
+          }
           rerunLayout = {
             framework: scaffold.project.framework,
             projectName: scaffold.project.projectName,
@@ -1464,8 +1481,9 @@ router.post('/rerun', generalRateLimiter, asyncHandler(async (req, res) => {
             report: scaffold.report,
             replayResult: scaffold.replayResult,
             htmlReport: htmlPath,
+            allureResults: allureResultsDir,
           };
-          console.log(`[Rerun] Persisted rerun report (status.json + replay-result.json + report/index.html) to ${scaffold.rerunDir}`);
+          console.log(`[Rerun] Persisted rerun report (status.json + replay-result.json + report/index.html${allureResultsDir ? ' + allure-results/' : ''}) to ${scaffold.rerunDir}`);
 
           // Bump the live-counter exposed via /api/dashboard/live so any
           // open dashboard refreshes its stats within ~2s instead of
@@ -1752,6 +1770,18 @@ async function executeMultiScenario(req, res, scenarios, browserType, baseUrl, h
             projectId: scaffold.project.projectName,
             testName: scaffold.testName,
           });
+          // [ZAC-FIX 2026-05-31] Allure for multi-scenario runs.
+          let allureMulti = null;
+          try {
+            const { writeAllureResults } = await import('../utils/allureWriter.js');
+            allureMulti = await writeAllureResults({
+              rerunDir: scaffold.rerunDir,
+              replayPayload,
+              framework: scaffold.project.framework,
+              projectId: scaffold.project.projectName,
+              testName: scaffold.testName,
+            });
+          } catch (_) {}
           rerunLayout = {
             framework: scaffold.project.framework,
             projectName: scaffold.project.projectName,
@@ -1761,6 +1791,7 @@ async function executeMultiScenario(req, res, scenarios, browserType, baseUrl, h
             report: scaffold.report,
             replayResult: scaffold.replayResult,
             htmlReport: htmlPathMulti,
+            allureResults: allureMulti,
           };
           try {
             const { markRerunCompleted } = await import('../services/dashboardService.js');
@@ -2137,6 +2168,18 @@ async function executeScenarioOutline(req, res, steps, browserType, baseUrl, hea
             projectId: scaffold.project.projectName,
             testName: scaffold.testName,
           });
+          // [ZAC-FIX 2026-05-31] Allure for outline runs.
+          let allureOutline = null;
+          try {
+            const { writeAllureResults } = await import('../utils/allureWriter.js');
+            allureOutline = await writeAllureResults({
+              rerunDir: scaffold.rerunDir,
+              replayPayload: { ...replayPayload, scenarioOutline: true },
+              framework: scaffold.project.framework,
+              projectId: scaffold.project.projectName,
+              testName: scaffold.testName,
+            });
+          } catch (_) {}
           rerunLayout = {
             framework: scaffold.project.framework,
             projectName: scaffold.project.projectName,
@@ -2146,8 +2189,9 @@ async function executeScenarioOutline(req, res, steps, browserType, baseUrl, hea
             report: scaffold.report,
             replayResult: scaffold.replayResult,
             htmlReport: htmlPathOutline,
+            allureResults: allureOutline,
           };
-          console.log(`[Rerun] Persisted Scenario Outline rerun (status.json + replay-result.json + report/index.html) to ${scaffold.rerunDir}`);
+          console.log(`[Rerun] Persisted Scenario Outline rerun (status.json + replay-result.json + report/index.html${allureOutline ? ' + allure-results/' : ''}) to ${scaffold.rerunDir}`);
           try {
             const { markRerunCompleted } = await import('../services/dashboardService.js');
             markRerunCompleted({

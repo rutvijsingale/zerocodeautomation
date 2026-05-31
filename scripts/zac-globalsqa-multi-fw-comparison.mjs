@@ -500,4 +500,10 @@ to browse, or click any "open" link above to view a per-rerun report.</p>
   log(`Or: open the live dashboard at http://localhost:3000/dashboard.html`);
   log('\nProjects KEPT on disk for browsing:');
   for (const fw of FRAMEWORKS) log(`  ${PROJECT_ID_FOR(fw)}  (framework: ${fw})`);
+  log(`\nAllure results were written to:`);
+  log(`  generated-projects/<framework>/${PROJECT_ID_FOR('<fw>')}/reruns/<test>/<ts>/allure-results/`);
+  log(`Build the Allure HTML reports with:`);
+  log(`  node scripts/zac-allure.mjs                   # per-rerun HTML`);
+  log(`  node scripts/zac-allure.mjs --aggregate       # one combined report`);
+  log(`  node scripts/zac-allure.mjs --serve           # combined + auto-open`);
 })().catch(err => { console.error('Harness error:', err); process.exit(2); });
