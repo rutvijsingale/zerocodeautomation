@@ -148,6 +148,19 @@ export function refactorToPom(project, opts = {}) {
         continue;
       }
 
+      // RULE A' — explicit pageBoundary marker (the "📄 New Page" button
+      // in the recording UI emits these). Strongest possible signal —
+      // split unconditionally and use the marker's `pageName` field as
+      // the override, falling back to the next unused @<X>Page tag.
+      if (step.kind === 'pageBoundary' || step.kind === 'newPage') {
+        startSegment(null, step.pageName || step.name || null);
+        // The boundary itself is metadata, NOT a step that touches a
+        // selector — don't push it into the segment so it doesn't show
+        // up as an action method on the page class.
+        lastWasClick = false;
+        continue;
+      }
+
       // RULE B — SPA/post-back transition (click → waitForSelector)
       if (needSpaSplit
           && step.kind === 'waitForSelector'
@@ -337,9 +350,15 @@ function renderSeleniumJavaPage(name, page) {
     ` * Auto-generated Page Object — derived from recorded steps for ${name}.`,
     ` * Selectors that begin with #/./[ are CSS; those starting with xpath= or //`,
     ` * are XPath; everything else is treated as raw CSS by Selenium.`,
+    ` *`,
+    ` * Lines INSIDE the // ZAC-MANAGED-BEGIN / END markers are regenerated`,
+    ` * every time you click "Generate Code". Add for/while loops, helper`,
+    ` * methods, or higher-level wrappers (e.g. executeLogin()) OUTSIDE the`,
+    ` * markers — those will survive regeneration intact.`,
     ` */`,
     `public class ${name} {`,
     ``,
+    `    // ZAC-MANAGED-BEGIN — DO NOT EDIT BETWEEN THESE MARKERS`,
     `    protected final WebDriver driver;`,
     `    protected final WebDriverWait wait;`,
     ``,
@@ -363,6 +382,17 @@ function renderSeleniumJavaPage(name, page) {
     const m = renderSeleniumActionMethod(step, page.selectors, seen);
     if (m) { lines.push(m); methodCount++; }
   }
+  // Close the managed region, then leave a hint where users can add code.
+  lines.push(`    // ZAC-MANAGED-END`);
+  lines.push(``);
+  lines.push(`    // ── Hand-written helpers (preserved across regeneration) ──`);
+  lines.push(`    // Add wrapper methods, loops, custom waits, etc. here:`);
+  lines.push(`    //`);
+  lines.push(`    //   public void executeLogin(String user, String pass) {`);
+  lines.push(`    //     typeUserName(user);`);
+  lines.push(`    //     typePassword(pass);`);
+  lines.push(`    //     clickLoginButton();`);
+  lines.push(`    //   }`);
   lines.push(`}`);
   return {
     name,
@@ -436,8 +466,13 @@ function renderPlaywrightJavaPage(name, page) {
     `/**`,
     ` * Auto-generated Page Object for ${name}, Playwright-Java flavour.`,
     ` * Each Locator getter is lazy so the page can survive SPA route changes.`,
+    ` *`,
+    ` * Code INSIDE // ZAC-MANAGED-BEGIN / END is regenerated. Add custom`,
+    ` * helpers (loops, OOP wrappers, conditional flow) OUTSIDE those`,
+    ` * markers — they will survive regeneration.`,
     ` */`,
     `public class ${name} {`,
+    `    // ZAC-MANAGED-BEGIN — DO NOT EDIT BETWEEN THESE MARKERS`,
     `    protected final Page page;`,
     ``,
     `    public ${name}(Page page) { this.page = page; }`,
@@ -454,6 +489,12 @@ function renderPlaywrightJavaPage(name, page) {
     const m = renderPlaywrightJavaActionMethod(step, page.selectors, seen);
     if (m) { lines.push(m); methodCount++; }
   }
+  lines.push(`    // ZAC-MANAGED-END`);
+  lines.push(``);
+  lines.push(`    // ── Hand-written helpers (preserved across regeneration) ──`);
+  lines.push(`    // public void executeLogin(String user, String pass) {`);
+  lines.push(`    //     typeUserName(user); typePassword(pass); clickLoginButton();`);
+  lines.push(`    // }`);
   lines.push(`}`);
   return {
     name,
@@ -495,9 +536,13 @@ function renderPlaywrightJavaActionMethod(step, selectorMap, seen) {
 function renderPlaywrightJsPage(name, page) {
   const lines = [
     `// Auto-generated Page Object for ${name} (Playwright JavaScript)`,
+    `// Lines INSIDE the // ZAC-MANAGED-BEGIN / END fence are regenerated`,
+    `// every time you click "Generate Code". Add helpers, loops, or`,
+    `// custom OOP wrappers OUTSIDE the fence — they will survive.`,
     `'use strict';`,
     ``,
     `class ${name} {`,
+    `  // ZAC-MANAGED-BEGIN — DO NOT EDIT BETWEEN THESE MARKERS`,
     `  constructor(page) { this.page = page; }`,
     ``,
   ];
@@ -511,6 +556,14 @@ function renderPlaywrightJsPage(name, page) {
     const m = renderPlaywrightJsActionMethod(step, page.selectors, seen);
     if (m) { lines.push(m); methodCount++; }
   }
+  lines.push(`  // ZAC-MANAGED-END`);
+  lines.push(``);
+  lines.push(`  // ── Hand-written helpers (preserved across regeneration) ──`);
+  lines.push(`  // async executeLogin(user, pass) {`);
+  lines.push(`  //   await this.typeUserName(user);`);
+  lines.push(`  //   await this.typePassword(pass);`);
+  lines.push(`  //   await this.clickLoginButton();`);
+  lines.push(`  // }`);
   lines.push(`}`);
   lines.push(``);
   lines.push(`module.exports = { ${name} };`);

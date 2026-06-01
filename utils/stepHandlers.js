@@ -338,6 +338,18 @@ export async function executePlaywrightStep(page, step, context = null) {
       break;
     }
 
+    // [ZAC-FIX 2026-06-01] Page-boundary marker.
+    // Emitted by the recording UI's "📄 New Page" button so the
+    // codegen / POM refactor knows where to split a flat scenario
+    // into per-page Page Object classes. At RUNTIME this step is a
+    // no-op — it carries metadata only (`step.pageName`).
+    case 'pageBoundary':
+    case 'newPage': {
+      const name = step.pageName || step.name || 'Page';
+      console.log(`[Page] ── boundary: ${name} ──`);
+      break;
+    }
+
     case 'waitFor':
       await page.waitForTimeout(Number(step.ms) || 500);
       break;

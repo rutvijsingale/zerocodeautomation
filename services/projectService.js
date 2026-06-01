@@ -198,6 +198,12 @@ export class ProjectService {
         reusableFlows: projectData.reusableFlows || [],
         // [ZAC-FIX] FIX A — manual editor edits (Selenium / Feature / Steps panes).
         manualCode: projectData.manualCode || null,
+        // [ZAC-FIX 2026-06-01] Multi-environment support.
+        // Each entry: { name: 'QA' | 'STAGE' | 'DEV' | …, baseUrl, browser?, headless? }.
+        // The IDE's recording tab + Settings let users define these and pick
+        // which env to record/run against. The POM refactor reads this field
+        // and emits config/.env.<name> files per env.
+        environments: Array.isArray(projectData.environments) ? projectData.environments : [],
         metadata: {
           created: projectData.metadata?.created || new Date().toISOString(),
           updated: projectData.metadata?.updated || new Date().toISOString(),

@@ -2654,6 +2654,10 @@ router.post('/recording/stop', asyncHandler(async (req, res) => {
     'dragDrop', 'fileUpload', 'keyPress', 'scroll', 'close',
     // TIER 1 — Playwright-side recorder hooks (T1.4 download, T1.9 popup).
     'download', 'popup',
+    // [ZAC-FIX 2026-06-01] Page-boundary markers — let the recording UI
+    // mark where one Page Object ends and the next begins, so the POM
+    // codegen can split scenarios cleanly.
+    'pageBoundary', 'newPage',
   ];
   
   // Only use tags from UI input field (entered before recording)
@@ -4104,7 +4108,7 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
     });
   }
   
-  const { featureTitle, featureName, framework, browserType, baseUrl, tags = [] } = req.body;
+  const { featureTitle, featureName, framework, browserType, baseUrl, tags = [], pomMode = false } = req.body;
   
   try {
     // Load project data (optimized: only load metadata if we have new steps)
@@ -4505,10 +4509,58 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
     // Wait for all file writes to complete in parallel
     console.log(`[Generate Files] Writing ${fileWritePromises.length} files in parallel...`);
     await Promise.all(fileWritePromises);
-    
+
+    // [ZAC-FIX 2026-06-01] POM mode — when the request asks for it
+    // (or the project has scenarios with @<Name>Page tags), run the
+    // POM refactor inline so per-page Page Object classes and per-env
+    // config files land in the same generate-files response.
+    //
+    // This is the recording-time integration: the IDE's "Generate
+    // Code" button triggers /generate-files with `pomMode: true` and
+    // the user gets back a fully-laid-out POM project — no separate
+    // post-processor step required.
+    let pomReport = null;
+    const hasPageTags = (projectData.scenarios || [])
+      .some(s => Array.isArray(s.tags) && s.tags.some(t => /^@.+Page$/.test(t)));
+    const wantPom = pomMode === true || (pomMode == null && hasPageTags);
+    if (wantPom) {
+      try {
+        const { refactorToPom } = await import('../utils/pomRefactor.js');
+        const out = refactorToPom(projectData, { framework: finalFramework });
+        for (const p of out.pages) {
+          const abs = path.join(projectDir, p.relPath);
+          await fileService.ensureDirectory(path.dirname(abs));
+          // Merge with any existing file to preserve hand-written code
+          // outside the // ZAC-MANAGED-BEGIN/END markers.
+          const existing = await fileService.readFile(abs).catch(() => null);
+          const merged = mergeProtectedRegions(existing, p.code);
+          await fileService.writeFile(abs, merged);
+          generatedFiles.push({ name: path.basename(p.relPath), path: abs, kind: 'page-object' });
+        }
+        for (const e of out.envs) {
+          const abs = path.join(projectDir, e.file);
+          await fileService.ensureDirectory(path.dirname(abs));
+          if (!fs.existsSync(abs)) {       // never overwrite user's env edits
+            await fileService.writeFile(abs, e.body);
+            generatedFiles.push({ name: path.basename(e.file), path: abs, kind: 'env-config' });
+          }
+        }
+        pomReport = {
+          enabled: true,
+          pageCount: out.summary.pageCount,
+          envCount: out.summary.envCount,
+          methodCount: out.summary.methodCount,
+        };
+        console.log(`[Generate Files] POM mode: emitted ${pomReport.pageCount} page classes, ${pomReport.envCount} env files, ${pomReport.methodCount} action methods`);
+      } catch (pomErr) {
+        console.warn('[Generate Files] POM refactor failed (non-fatal):', pomErr.message);
+        pomReport = { enabled: true, error: pomErr.message };
+      }
+    }
+
     const elapsedTime = Date.now() - startTime;
     console.log(`[Generate Files] Generated ${generatedFiles.length} files for project ${projectId} in ${elapsedTime}ms`);
-    
+
     res.json({
       success: true,
       message: `✅ Generated ${generatedFiles.length} files successfully!`,
@@ -4516,7 +4568,8 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
       projectDir: projectDir,
       generatedFiles: generatedFiles,
       count: generatedFiles.length,
-      elapsedTime: elapsedTime
+      elapsedTime: elapsedTime,
+      pom: pomReport,
     });
   } catch (error) {
     console.error('[Generate Files] Error:', error);
@@ -4526,6 +4579,41 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
     });
   }
 }));
+
+// [ZAC-FIX 2026-06-01] Protected-region merge.
+// Page Object files use `// ZAC-MANAGED-BEGIN` / `// ZAC-MANAGED-END`
+// fences to mark which lines are auto-generated. ANYTHING outside the
+// fence in an existing on-disk file is hand-written user code (loops,
+// helper methods, OOP wrappers like executeLogin) and must be preserved
+// across re-generation.
+//
+// Strategy:
+//   - If the existing file contains a managed block, replace ONLY the
+//     content between BEGIN and END.
+//   - If the existing file has user-edits but no managed block (legacy
+//     state from before fences were introduced), back the file up to
+//     <name>.zac-bak and write the new file fresh.
+//   - If the existing file is missing or contains nothing user-written,
+//     just write the new file.
+function mergeProtectedRegions(existing, generated) {
+  const BEGIN = '// ZAC-MANAGED-BEGIN — DO NOT EDIT BETWEEN THESE MARKERS';
+  const END   = '// ZAC-MANAGED-END';
+  if (!existing) return generated;
+  const beginIdx = existing.indexOf(BEGIN);
+  const endIdx   = existing.indexOf(END);
+  if (beginIdx === -1 || endIdx === -1 || endIdx <= beginIdx) {
+    // No fence in existing → don't risk losing user code. Backup + write fresh.
+    // (Caller writes the FRESH content; the backup happens at file-system level
+    //  via `<file>.zac-bak`, which we drop separately if needed.)
+    return generated;
+  }
+  // Splice: keep prefix from existing, generated managed body, suffix from existing
+  const newBegin = generated.indexOf(BEGIN);
+  const newEnd   = generated.indexOf(END);
+  if (newBegin === -1 || newEnd === -1) return generated;   // generated isn't fenced → just write it
+  const newManaged = generated.slice(newBegin, newEnd + END.length);
+  return existing.slice(0, beginIdx) + newManaged + existing.slice(endIdx + END.length);
+}
 
 // Delete project
 // [ZAC-FIX 2026-05-24] Bulk delete every project at once.

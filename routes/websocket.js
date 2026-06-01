@@ -182,6 +182,8 @@ export const handleActionCapture = async (req, res) => {
       'waitFor', 'waitForSelector', 'screenshot', 'hover',
       'dragDrop', 'fileUpload', 'keyPress', 'scroll', 'close',
       'download', 'popup',
+      // Page-boundary markers (ZAC-FIX 2026-06-01).
+      'pageBoundary', 'newPage',
     ];
 
     // T2.8 — auto-suggested assertions take a side-channel. They are
