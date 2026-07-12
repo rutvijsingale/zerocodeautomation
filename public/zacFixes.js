@@ -897,9 +897,15 @@
 
   /* ─────────────── FIX C — rerun → dashboard wiring ─────────────── */
   function installRerunDashboardWiring() {
-    // Subscribe to the live rerun-completed snapshot via /api/dashboard/live;
-    // when a new completion arrives, also append a row to /api/runs/append
-    // so the Dashboard "All runs" table is always populated.
+    // Subscribe to the live rerun-completed snapshot via /api/dashboard/live
+    // purely to refresh the dashboard UI the moment a run lands.
+    //
+    // [ZAC-FIX] The durable rerun-history append USED to live here (mirroring
+    // the single-slot snapshot to /api/runs/append). That was lossy — it
+    // dropped completions that arrived faster than this poll, and recorded
+    // NOTHING when no dashboard tab was open (headless / CI / API reruns).
+    // History is now written authoritatively server-side in
+    // dashboardService.markRerunCompleted, so this poller only drives the UI.
     const isDashboard = /dashboard\.html/.test(location.pathname);
 
     let lastSeen = 0;
@@ -911,34 +917,15 @@
         const lrc = snap && snap.lastRerunCompleted;
         if (!lrc || !lrc.completedAt || lrc.completedAt <= lastSeen) return;
         lastSeen = lrc.completedAt;
-        // Mirror to durable rerun-history.
-        await fetch('/api/runs/append', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            projectId:   lrc.projectId || 'unknown',
-            framework:   lrc.framework || (window.state && window.state.currentProjectFramework) || 'unknown',
-            testRunner:  lrc.testRunner || null,
-            status:      lrc.success ? 'passed' : 'failed',
-            durationMs:  lrc.durationMs || 0,
-            healCount:   lrc.healCount || 0,
-            deliberateHealCount: lrc.deliberateHealCount || 0,
-            totalScenarios: lrc.totalScenarios || 0,
-            passed:      lrc.passed || 0,
-            failed:      lrc.failed || 0,
-            healed:      lrc.healed || 0,
-            timestamp:   new Date(lrc.completedAt).toISOString(),
-          })
-        });
         if (isDashboard) {
           showToast('Rerun finished — refreshing dashboard', 'info', 1500);
           window.dispatchEvent(new CustomEvent('zac-runs:changed'));
         }
-        console.log('[ZAC-FIX] FIX C: rerun mirrored to history', lrc);
+        console.log('[ZAC-FIX] FIX C: rerun detected, dashboard refreshed', lrc);
       } catch (e) { /* polling silently */ }
     }
     setInterval(tick, 4000);
-    console.log('[ZAC-FIX] FIX C: rerun → history mirror running');
+    console.log('[ZAC-FIX] FIX C: rerun → dashboard refresh running');
   }
 
   /* ─────────────── FIX D — AI "Apply this fix" button ─────────────── */

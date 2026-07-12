@@ -450,13 +450,55 @@ function testClassJava({ className, baseUrl, steps }) {
         lines.push(`    }`);
         break;
       }
+      // [ZAC-FIX] doubleClick via the Actions class — mirrors the Cucumber
+      // Java generator. Previously fell through to "// [unsupported]".
+      case 'doubleClick': {
+        lines.push(`    {`);
+        lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
+        lines.push(`      new org.openqa.selenium.interactions.Actions(driver).doubleClick(e).perform();`);
+        lines.push(`    }`);
+        break;
+      }
+      // [ZAC-FIX] waitForSelector — reuse the healing finder, which polls for
+      // presence/visibility, instead of skipping the wait entirely.
+      case 'waitForSelector': {
+        lines.push(`    {`);
+        lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}")); // explicit wait for element`);
+        lines.push(`      org.testng.Assert.assertNotNull(e, "waitForSelector: element never appeared");`);
+        lines.push(`    }`);
+        break;
+      }
+      case 'check': {
+        lines.push(`    {`);
+        lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
+        lines.push(`      if (!e.isSelected()) e.click();`);
+        lines.push(`    }`);
+        break;
+      }
+      case 'uncheck': {
+        lines.push(`    {`);
+        lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
+        lines.push(`      if (e.isSelected()) e.click();`);
+        lines.push(`    }`);
+        break;
+      }
+      case 'selectRadio': {
+        lines.push(`    {`);
+        lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
+        lines.push(`      if (!e.isSelected()) e.click();`);
+        lines.push(`    }`);
+        break;
+      }
       case 'scroll': {
         const x = Number(step.scrollX || 0), y = Number(step.scrollY || 0);
         lines.push(`    ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("window.scrollTo(${x}, ${y});");`);
         break;
       }
       case 'assertText': {
-        const expected = `"${escapeJavaString(step.expectedValue || step.text || '')}"`;
+        // [ZAC-FIX] also accept step.value — the recorder stores the expected
+        // text there for asserts added from the UI; without it the generated
+        // assertion degraded to contains("") which trivially passes.
+        const expected = `"${escapeJavaString(step.expectedValue || step.text || step.value || '')}"`;
         lines.push(`    {`);
         lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
         lines.push(`      Assert.assertTrue(e.getText().contains(${expected}), "expected text not found");`);
@@ -467,6 +509,30 @@ function testClassJava({ className, baseUrl, steps }) {
         lines.push(`    {`);
         lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
         lines.push(`      Assert.assertTrue(e.isDisplayed(), "element not visible");`);
+        lines.push(`    }`);
+        break;
+      }
+      // [ZAC-FIX] assertValue / assertChecked — parity with the other
+      // frameworks; previously skipped as "// [unsupported]".
+      case 'assertValue': {
+        const expected = `"${escapeJavaString(step.expectedValue || step.value || step.text || '')}"`;
+        lines.push(`    {`);
+        lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
+        lines.push(`      Assert.assertEquals(e.getAttribute("value"), ${expected}, "value mismatch");`);
+        lines.push(`    }`);
+        break;
+      }
+      case 'assertChecked': {
+        lines.push(`    {`);
+        lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
+        lines.push(`      Assert.assertTrue(e.isSelected(), "element not checked");`);
+        lines.push(`    }`);
+        break;
+      }
+      case 'assertNotChecked': {
+        lines.push(`    {`);
+        lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
+        lines.push(`      Assert.assertFalse(e.isSelected(), "element unexpectedly checked");`);
         lines.push(`    }`);
         break;
       }

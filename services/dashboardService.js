@@ -665,6 +665,55 @@ export function collectLiveSnapshot({ activeSessions, runningReruns } = {}) {
 // /api/dashboard/stats the moment a run lands. Survives until the next
 // rerun completes; cleared on server restart.
 let _lastRerunCompleted = null;
+
+// [ZAC-FIX] Authoritative, server-side rerun-history logging.
+//
+// Previously reports/rerun-history.jsonl was populated ONLY by a frontend
+// poller (public/zacFixes.js) that mirrored the single-slot _lastRerunCompleted
+// snapshot via /api/runs/append. That mirror was lossy: when reruns completed
+// faster than the ~2s dashboard poll (rapid multi-project runs) intermediate
+// completions were overwritten in the single slot and never recorded, and when
+// NO dashboard tab was open (headless / CI / API-driven reruns) NOTHING was ever
+// logged. It also risked phantom rows from the clear operations that call this
+// with executionId 'cleared-by-user' / 'locators-cleared'.
+//
+// The history is now written here, at the server-side completion funnel, so it
+// is durable regardless of whether a dashboard is open. markRerunCompleted is
+// called more than once per rerun (layout block + main marker), so we dedupe by
+// executionId, and we skip the non-rerun clear sentinels.
+const _loggedRunIds = new Set();
+const _CLEAR_SENTINELS = new Set(['cleared-by-user', 'locators-cleared']);
+
+function _inferTestRunner(framework) {
+  if (!framework) return 'unknown';
+  if (framework.includes('testng')) return 'testng';
+  if (framework.includes('java')) return 'junit';
+  if (framework.includes('typescript') || framework.includes('javascript') || framework.includes('playwright')) return 'mocha';
+  return 'unknown';
+}
+
+async function _appendRerunHistory({ executionId, framework, projectId, testName, success }) {
+  const row = {
+    id: executionId,
+    timestamp: new Date().toISOString(),
+    project: projectId || 'unknown',
+    framework: framework || 'unknown',
+    test_runner: _inferTestRunner(framework),
+    status: success ? 'passed' : 'failed',
+    duration_ms: 0,
+    heal_count: 0,
+    deliberate_heal_count: 0,
+    total_scenarios: 0,
+    passed: 0,
+    failed: 0,
+    healed: 0,
+    test_name: testName || null,
+  };
+  const reportsDir = path.join(REPO, 'reports');
+  await fs.mkdir(reportsDir, { recursive: true });
+  await fs.appendFile(path.join(reportsDir, 'rerun-history.jsonl'), JSON.stringify(row) + '\n', 'utf8');
+}
+
 export function markRerunCompleted({ executionId, framework, projectId, testName, success } = {}) {
   _lastRerunCompleted = {
     executionId: executionId || null,
@@ -675,7 +724,14 @@ export function markRerunCompleted({ executionId, framework, projectId, testName
     completedAt: Date.now(),
     completedAtIso: new Date().toISOString(),
   };
+
+  // Durable history append — once per real rerun, skipping clear sentinels.
+  if (executionId && !_CLEAR_SENTINELS.has(executionId) && !_loggedRunIds.has(executionId)) {
+    _loggedRunIds.add(executionId);
+    _appendRerunHistory({ executionId, framework, projectId, testName, success: !!success })
+      .catch((e) => console.warn('[ZAC-FIX] rerun-history append failed (non-fatal):', e.message));
+  }
 }
 
 /** Test hook: clear the marker so subsequent polls report null again. */
-export function _clearLastRerunForTests() { _lastRerunCompleted = null; }
+export function _clearLastRerunForTests() { _lastRerunCompleted = null; _loggedRunIds.clear(); }

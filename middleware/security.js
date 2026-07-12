@@ -77,7 +77,7 @@ export const generalRateLimiter = createRateLimiter(15 * 60 * 1000, 200); // 200
 // "HTTP 429" on /api/frameworks when navigating tabs after smoke testing.
 // Bumped to 600/min (10/sec sustained) which is still cheap for a
 // localhost-only IDE but absorbs the worst-case observed traffic.
-export const pollingRateLimiter = createRateLimiter(60 * 1000, 600);
+export const pollingRateLimiter = createRateLimiter(60 * 1000, 600); // 600 requests per minute
 
 // Security headers
 export const securityHeaders = helmet({
@@ -128,14 +128,23 @@ export const validateProjectName = (name) => {
 
 // Validate session ID
 export const validateSessionId = (sessionId) => {
+  // [ZAC-FIX] Tag these as ValidationError so the global errorHandler maps
+  // them to HTTP 400 (client error) instead of the generic 500 (server bug).
+  // A malformed / non-UUID sessionId is bad input, not a server fault — this
+  // keeps the session-id contract consistent with validateProjectName.
+  const fail = (msg) => {
+    const err = new Error(msg);
+    err.name = 'ValidationError';
+    throw err;
+  };
   if (!sessionId || typeof sessionId !== 'string') {
-    throw new Error('Session ID is required');
+    fail('Session ID is required');
   }
 
   // Basic UUID format validation
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (!uuidRegex.test(sessionId)) {
-    throw new Error('Invalid session ID format');
+    fail('Invalid session ID format');
   }
 
   return sessionId;

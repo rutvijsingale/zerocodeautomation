@@ -728,8 +728,10 @@ router.post('/export', strictRateLimiter, asyncHandler(async (req, res) => {
     await fileService.writeFile(path.join(worldDir, 'world.ts'), worldFile);
   }
 
-  // Create zip file
-  const zipPath = await fileService.createProjectZip(projectName);
+  // Create zip file. [ZAC-FIX] Zip from the actual exportRoot — for
+  // projectId-based exports that is projects/<projectId>/, not the legacy
+  // sample-export/<projectName> path createProjectZip would otherwise derive.
+  const zipPath = await fileService.createProjectZip(projectName, exportRoot);
 
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename=${projectName}.zip`);
@@ -2476,11 +2478,13 @@ router.post('/recording/start', strictRateLimiter, asyncHandler(async (req, res)
   // T2.5 — accept an optional `viewport: { width, height }` from the
   // recorder UI (viewport-preset dropdown). null/missing keeps the
   // existing default of "maximize".
-  const { baseUrl = 'about:blank', browserType = 'chromium', projectId, viewport = null } = req.body;
+  const { baseUrl = '', browserType = 'chromium', projectId, viewport = null } = req.body || {};
+  const normalizedBaseUrl = typeof baseUrl === 'string' ? baseUrl.trim() : '';
+  let resolvedBaseUrl = normalizedBaseUrl;
 
   console.log(`[API] ========================================`);
   console.log(`[API] Starting recording session...`);
-  console.log(`[API] Base URL: ${baseUrl}`);
+  console.log(`[API] Base URL (requested): ${normalizedBaseUrl || '(empty)'}`);
   console.log(`[API] Browser Type: ${browserType}`);
   console.log(`[API] Project ID: ${projectId || 'none'}`);
   console.log(`[API] Viewport: ${viewport ? `${viewport.width}x${viewport.height}` : 'maximize (default)'}`);
@@ -2491,7 +2495,29 @@ router.post('/recording/start', strictRateLimiter, asyncHandler(async (req, res)
     await projectService.setCurrentProject(projectId);
   }
 
-  const session = await browserService.createSession(baseUrl, browserType, { viewport });
+  // If caller did not pass a URL, reuse the selected project's baseUrl.
+  if (!resolvedBaseUrl) {
+    const fallbackProjectId = projectId || projectService.getCurrentProject();
+    if (fallbackProjectId) {
+      try {
+        const projectData = await projectService.loadProjectData(fallbackProjectId);
+        resolvedBaseUrl = (projectData.baseUrl || '').trim();
+        if (resolvedBaseUrl) {
+          console.log(`[API] Base URL fallback from project "${fallbackProjectId}": ${resolvedBaseUrl}`);
+        }
+      } catch (e) {
+        console.warn(`[API] Could not load baseUrl from project "${fallbackProjectId}": ${e.message}`);
+      }
+    }
+  }
+
+  if (!resolvedBaseUrl) {
+    resolvedBaseUrl = 'about:blank';
+  }
+
+  console.log(`[API] Base URL (resolved): ${resolvedBaseUrl}`);
+
+  const session = await browserService.createSession(resolvedBaseUrl, browserType, { viewport });
 
   console.log(`[API] ✅ Session created: ${session.sessionId}`);
   console.log(`[API] Total active sessions: ${browserService.getActiveSessionCount()}`);
@@ -4108,7 +4134,7 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
     });
   }
   
-  const { featureTitle, featureName, framework, browserType, baseUrl, tags = [], pomMode = false } = req.body;
+  const { featureTitle, featureName, framework, browserType, baseUrl, tags = [], pomMode } = req.body;
   
   try {
     // Load project data (optimized: only load metadata if we have new steps)
@@ -4156,12 +4182,22 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
     // pure additive change — the Cucumber pipelines are untouched.
     if (finalFramework === 'selenium-testng') {
       const seleniumTestng = await import('../generators/selenium-testng.js');
+      // [ZAC-FIX] Multi-scenario projects (the "Add new scenario" flow) keep
+      // their steps under scenarios[i].steps with an empty top-level steps[].
+      // The TestNG generator consumes a flat steps[]; without this it silently
+      // emitted an almost-empty @Test (just the baseUrl navigate) and dropped
+      // every recorded action. Flatten scenario steps when the top-level list
+      // is empty so the generated test reflects the full recording.
+      const testngSteps = (steps && steps.length)
+        ? steps
+        : (Array.isArray(projectData.scenarios) ? projectData.scenarios : [])
+            .flatMap((s) => (s && Array.isArray(s.steps)) ? s.steps : []);
       const result = seleniumTestng.generateProject({
         projectName,
         featureTitle: finalFeatureTitle,
         featureName: finalFeatureName,
         baseUrl: finalBaseUrl,
-        steps,
+        steps: testngSteps,
         tags: finalTags,
         browserType: finalBrowserType,
       });

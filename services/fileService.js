@@ -103,8 +103,14 @@ export class FileService {
     return files;
   }
 
-  async createProjectZip(projectName) {
-    const projectPath = await this.getProjectPath(projectName);
+  // [ZAC-FIX] Accept an optional explicit sourceDir. projectId-based exports
+  // write their files under projects/<projectId>/ (via projectService), NOT
+  // under this.baseDir/<projectName> (the legacy sample-export location). If
+  // we always re-derived the path from projectName we'd zip the wrong (empty)
+  // legacy dir and throw "Project not found". When the caller knows the real
+  // export root it passes it here; legacy callers keep the projectName path.
+  async createProjectZip(projectName, sourceDir = null) {
+    const projectPath = sourceDir || await this.getProjectPath(projectName);
 
     if (!(await this.fileExists(projectPath))) {
       throw new Error(`Project not found: ${projectName}`);

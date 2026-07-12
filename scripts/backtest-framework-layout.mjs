@@ -100,7 +100,7 @@ async function checkHealth() {
   // The frameworks must match exactly what's wired up in the generators.
   // No Cypress, no WebdriverIO — only what's actually supported today.
   // Source of truth: config/frameworks.json + generators/<id>.js.
-  const expected = ['playwright-java', 'playwright-typescript', 'selenium-java', 'selenium-testng'];
+  const expected = ['playwright-java', 'playwright-javascript', 'playwright-typescript', 'selenium-java', 'selenium-testng'];
   if (JSON.stringify(ids) === JSON.stringify(expected)) {
     logPass(`registry returns exactly the ${expected.length} frameworks wired into the generators`);
   } else {

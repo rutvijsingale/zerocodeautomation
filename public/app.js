@@ -28,6 +28,7 @@ const state = {
   maxHistorySize: 50, // Maximum number of history entries
   currentProjectName: null,
   currentProjectId: null, // Current project ID
+  currentProjectBaseUrl: null, // Base URL from selected project
   currentStepsFilePath: null,
   autoSaveEnabled: true, // Auto-save project on changes
   autoSaveTimeout: null, // Debounce timer for auto-save
@@ -2894,7 +2895,10 @@ async function startRecording() {
   if (state.recording.active) return;
   
   // No need to require project selection - will be created from form details when recording stops
-  const baseUrl = document.getElementById('baseUrl').value || 'about:blank';
+  const baseUrlInput = document.getElementById('baseUrl');
+  const typedBaseUrl = (baseUrlInput?.value || '').trim();
+  const fallbackBaseUrl = (state.currentProjectBaseUrl || state.config.baseUrl || '').trim();
+  const baseUrl = typedBaseUrl || fallbackBaseUrl || 'about:blank';
   const browserType = document.getElementById('browserType').value || 'chromium';
 
   // T2.5 — viewport preset. "maximize" → null (existing default). Otherwise
@@ -2928,6 +2932,7 @@ async function startRecording() {
       body: JSON.stringify({
         baseUrl,
         browserType,
+        projectId: state.currentProjectId || undefined,
         viewport,           // T2.5 — null means existing maximize behavior
         viewportPreset,     // raw preset name for diagnostics / future use
         // Don't require projectId - will be created from form details when recording stops
@@ -3902,6 +3907,7 @@ function clearProjectList() {
   // Clear current project state
   state.currentProjectId = null;
   state.currentProjectName = null;
+  state.currentProjectBaseUrl = null;
   state.steps = [];
   state.backgroundSteps = [];
   state.scenarios = [];
@@ -3931,6 +3937,7 @@ async function selectProject(projectId) {
   if (!projectId) {
     state.currentProjectId = null;
     state.currentProjectName = null;
+    state.currentProjectBaseUrl = null;
     localStorage.removeItem('currentProjectId');
     updateProjectStatus('No project selected');
     return;
@@ -3948,6 +3955,7 @@ async function selectProject(projectId) {
     if (data.success && data.project) {
       state.currentProjectId = projectId;
       state.currentProjectName = data.project.name;
+      state.currentProjectBaseUrl = (data.project.baseUrl || '').trim() || null;
       localStorage.setItem('currentProjectId', projectId);
       
       // Load project data into state
