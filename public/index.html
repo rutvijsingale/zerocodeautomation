@@ -246,6 +246,14 @@
           </small>
         </label>
         <label>Base URL (leave blank for blank browser) <input id="baseUrl" placeholder="Leave blank to start with blank browser"/></label>
+        <label>Database (for DB-check steps)
+          <select id="dbEngine" style="width: 100%; padding: 10px; border-radius: 8px; background: rgba(13, 17, 23, 0.6); border: 1px solid var(--border); color: var(--text); font-size: 14px;">
+            <option value="auto">Auto — zero-setup (H2 / SQLite in-memory)</option>
+          </select>
+          <small style="color: var(--muted); font-size: 11px; display: block; margin-top: 4px;">
+            💡 Used by <code>dbQuery</code> steps. Choose your real DB engine here; set the connection at run time via <code>DB_URL</code>/<code>DB_USER</code>/<code>DB_PASS</code> (or <code>DB_FILE</code> for SQLite) — no credentials are stored in generated code.
+          </small>
+        </label>
         <label>Feature Title <input id="featureTitle" placeholder="Recorded Flow"/></label>
         <label>Feature Name <input id="featureName" placeholder="Recorded Feature"/></label>
         <label>Tags (space-separated) <input id="tags" placeholder="@smoke @regression"/></label>

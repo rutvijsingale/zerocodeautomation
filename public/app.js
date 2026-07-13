@@ -3980,6 +3980,10 @@ async function selectProject(projectId) {
       const frameworkSelect = document.getElementById('framework');
       if (frameworkSelect) frameworkSelect.value = data.project.framework || 'playwright-java';
 
+      // [ZAC-FIX] Load the project's DB engine into the dropdown (defaults to auto).
+      const dbEngineSel = document.getElementById('dbEngine');
+      if (dbEngineSel) dbEngineSel.value = (data.project.dbConfig && data.project.dbConfig.engine) || 'auto';
+
       // [ZAC-FIX] FIX B — remember the framework this project was saved with so
       // zacFixes.js can warn the user before they switch dropdowns.
       state.currentProjectFramework = data.project.framework || frameworkSelect?.value || null;
@@ -4184,8 +4188,11 @@ async function saveCurrentProject() {
         pages:   codeSelenium,
         updatedAt: new Date().toISOString(),
       } : null,
+      // [ZAC-FIX] Per-project DB engine for dbQuery steps (auto | postgresql |
+      // mysql | sqlserver). Connection stays env-driven at run time.
+      dbConfig: { engine: document.getElementById('dbEngine')?.value || 'auto' },
     };
-    
+
     const response = await fetch(`/api/projects/${state.currentProjectId}/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4422,7 +4429,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Load projects on startup
   loadProjects();
-  
+
+  // [ZAC-FIX] Populate the DB engine dropdown from /api/db/engines so testers
+  // can point dbQuery steps at a real database (Postgres / MySQL / SQL Server)
+  // instead of the zero-setup default. Best-effort — keeps the 'auto' option
+  // if the endpoint is unavailable.
+  (async () => {
+    const sel = document.getElementById('dbEngine');
+    if (!sel) return;
+    try {
+      const { engines } = await (await fetch('/api/db/engines')).json();
+      if (Array.isArray(engines) && engines.length) {
+        const current = sel.value || 'auto';
+        sel.innerHTML = engines.map((e) =>
+          `<option value="${e.id}">${e.label}${e.connectionEnv ? ' — ' + e.connectionEnv.join('/') : ''}</option>`
+        ).join('');
+        sel.value = current;
+      }
+    } catch (_) { /* keep the static 'auto' option */ }
+  })();
+
   // Project management event listeners
   const projectDropdown = document.getElementById('project-dropdown');
   if (projectDropdown) {
