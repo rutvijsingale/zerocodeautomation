@@ -2,6 +2,7 @@
  * Playwright Test Spec Generator
  * Generates Playwright test specification files from recorded actions
  */
+import { nodeDbQuerySnippet } from './db-config.js';
 
 /**
  * Generate Playwright test spec from steps
@@ -11,7 +12,7 @@
  * @param {Array} options.steps - Array of step actions
  * @returns {string} Generated Playwright test spec code
  */
-export function generatePlaywrightSpec({ featureTitle, baseUrl, steps = [] }) {
+export function generatePlaywrightSpec({ featureTitle, baseUrl, steps = [], dbEngine = 'auto' }) {
   const toLine = (s) => s.trimEnd() + '\n';
   let spec = `import { test, expect } from '@playwright/test';\n\n`;
   spec += `test('${featureTitle || 'Recorded Flow'}', async ({ page }) => {\n`;
@@ -91,15 +92,12 @@ export function generatePlaywrightSpec({ featureTitle, baseUrl, steps = [] }) {
         spec += toLine(`  await page.locator(${JSON.stringify(step.selector)}).evaluate(el => el.click());`);
         break;
       case 'dbQuery': {
-        // [ZAC-FIX] DB assertion — env-configured SQLite (zero-setup), row count.
+        // [ZAC-FIX] DB assertion — engine configurable (project.dbConfig.engine);
+        // connection from DB_URL/DB_FILE env at run time. Row-count assertion.
         const dbSql = step.query || step.value || 'SELECT 1';
         const dbRows = Number.isFinite(Number(step.expectedRows)) ? Number(step.expectedRows) : 1;
         spec += toLine(`  {`);
-        spec += toLine(`    const Database = (await import('better-sqlite3')).default;`);
-        spec += toLine(`    const _db = new Database(process.env.DB_FILE || ':memory:');`);
-        spec += toLine(`    const _rows = _db.prepare(${JSON.stringify(dbSql)}).all();`);
-        spec += toLine(`    expect(_rows.length).toBe(${dbRows});`);
-        spec += toLine(`    _db.close();`);
+        spec += nodeDbQuerySnippet(dbEngine, { sqlExpr: JSON.stringify(dbSql), expectedExpr: String(dbRows), indent: '    ' }) + '\n';
         spec += toLine(`  }`);
         break;
       }

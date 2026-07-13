@@ -2,13 +2,15 @@
  * TypeScript Step Definitions Generator
  * Generates Cucumber step definitions in TypeScript from recorded actions
  */
+import { nodeDbQuerySnippet } from './db-config.js';
 
 /**
  * Generate TypeScript step definitions file
  * @param {Array} actions - Array of recorded actions to generate specific step definitions for
  * @returns {string} Generated step definitions code
  */
-export function generateStepDefinitions(actions = []) {
+export function generateStepDefinitions(actions = [], opts = {}) {
+  const dbEngine = opts.dbEngine || 'auto';
   // Build dynamic step definitions based on recorded actions
   const stepDefinitions = new Set();
   const navigationSteps = new Set();
@@ -246,20 +248,12 @@ And('I click {string} using JavaScript', async function(this: PlaywrightWorld, s
 });
 
 // [ZAC-FIX] DB query assertion — runs SQL against an env-configured connection
-// (defaults to an in-memory SQLite DB for zero setup) and asserts row count.
-// Requires the better-sqlite3 dependency (added to package.json when a dbQuery
-// step is present). Swap the driver/env for your target database.
+// and asserts row count. Engine is configurable (project.dbConfig.engine);
+// connection comes from DB_URL (pg/mysql/mssql) or DB_FILE (sqlite) at run time
+// so credentials never live in code. The matching client dependency is added to
+// package.json when a dbQuery step is present.
 And('I run DB query {string} expecting {int} rows', async function(this: PlaywrightWorld, sql: string, expectedRows: number) {
-  const Database = (await import('better-sqlite3')).default;
-  const db = new Database(process.env.DB_FILE || ':memory:');
-  try {
-    const rows = db.prepare(sql).all();
-    if (rows.length !== expectedRows) {
-      throw new Error(\`DB row count mismatch for [\${sql}]: expected \${expectedRows} but got \${rows.length}\`);
-    }
-  } finally {
-    db.close();
-  }
+${nodeDbQuerySnippet(dbEngine, { sqlExpr: 'sql', expectedExpr: 'expectedRows', indent: '  ' })}
 });
 
 // Typing

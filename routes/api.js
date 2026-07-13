@@ -249,6 +249,21 @@ router.get('/frameworks', pollingRateLimiter, asyncHandler(async (req, res) => {
   res.json({ frameworks });
 }));
 
+// [ZAC-FIX] Configurable DB engines for dbQuery steps. Lets the IDE populate a
+// "Database" dropdown; the chosen id is stored on the project as
+// project.dbConfig.engine and drives the generated driver dependency +
+// connection code. Connection values themselves come from env at run time
+// (DB_URL/DB_USER/DB_PASS, or DB_FILE for sqlite) — never hard-coded.
+router.get('/db/engines', pollingRateLimiter, asyncHandler(async (req, res) => {
+  const { DB_ENGINES } = await import('../generators/db-config.js');
+  const engines = Object.values(DB_ENGINES).map((e) => ({
+    id: e.id,
+    label: e.label,
+    connectionEnv: e.node.driver === 'sqlite' ? ['DB_FILE'] : ['DB_URL', 'DB_USER', 'DB_PASS'],
+  }));
+  res.json({ engines, default: 'auto' });
+}));
+
 // Materialize / refresh the canonical layout for a project. Idempotent.
 // Body: { framework: string, projectName: string }
 router.post('/project-layout/scaffold', generalRateLimiter, asyncHandler(async (req, res) => {
@@ -4180,22 +4195,22 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
         .flatMap((s) => (s && Array.isArray(s.steps)) ? s.steps : [])),
     ];
     const hasDbStep = _allStepsForScan.some((s) => s && (s.kind || s.action) === 'dbQuery');
-    const H2_POM_DEP = `        <!-- [ZAC] H2 in-memory DB for dbQuery steps (zero-setup). Swap for your JDBC driver + set DB_URL/DB_USER/DB_PASS. -->
-        <dependency>
-            <groupId>com.h2database</groupId>
-            <artifactId>h2</artifactId>
-            <version>2.2.224</version>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>`;
+    // [ZAC-FIX] Configurable DB engine — a project sets project.dbConfig.engine
+    // (auto | postgresql | mysql | sqlserver) so testers can point dbQuery
+    // steps at their REAL database via DB_URL/DB_USER/DB_PASS (or DB_FILE for
+    // sqlite). We inject the matching driver dependency only when a dbQuery
+    // step is present; the default 'auto' keeps zero-setup H2/SQLite.
+    const dbConfig = await import('../generators/db-config.js');
+    const dbEngine = dbConfig.resolveDbEngine(projectData);
     const injectH2 = (pom) => hasDbStep && typeof pom === 'string'
-      ? pom.replace(/\n\s*<\/dependencies>/, '\n' + H2_POM_DEP) : pom;
+      ? pom.replace(/\n\s*<\/dependencies>/, '\n' + dbConfig.javaDbDependencyXml(dbEngine) + '\n    </dependencies>') : pom;
     const injectSqlite = (pkg) => {
       if (!hasDbStep || typeof pkg !== 'string') return pkg;
       try {
         const j = JSON.parse(pkg);
+        const dep = dbConfig.nodeDbDependency(dbEngine);
         j.dependencies = j.dependencies || {};
-        if (!j.dependencies['better-sqlite3']) j.dependencies['better-sqlite3'] = '^11.3.0';
+        if (!j.dependencies[dep.name]) j.dependencies[dep.name] = dep.version;
         return JSON.stringify(j, null, 2);
       } catch { return pkg; }
     };
@@ -4502,7 +4517,8 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
       const spec = playwrightGenerator.generatePlaywrightSpec({
         featureTitle: finalFeatureTitle,
         baseUrl: finalBaseUrl,
-        steps: steps
+        steps: steps,
+        dbEngine, // [ZAC-FIX] configurable DB engine for dbQuery codegen
       });
       const testsDir = path.join(projectDir, 'tests');
       await fileService.ensureDirectory(testsDir);
@@ -4549,7 +4565,7 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
         })
       );
       
-      const stepDefs = stepsGenerator.generateStepDefinitions(steps);
+      const stepDefs = stepsGenerator.generateStepDefinitions(steps, { dbEngine }); // [ZAC-FIX] configurable DB engine
       const stepsFileName = finalFeatureTitle.replace(/[^a-zA-Z0-9]/g, '') || 'RecordedTest';
       const stepDefsFileName = `${stepsFileName}Steps.${ext}`;
       const stepDefsPath = path.join(stepsDir, stepDefsFileName);

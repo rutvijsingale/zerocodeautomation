@@ -204,6 +204,11 @@ export class ProjectService {
         // which env to record/run against. The POM refactor reads this field
         // and emits config/.env.<name> files per env.
         environments: Array.isArray(projectData.environments) ? projectData.environments : [],
+        // [ZAC-FIX] Configurable DB engine for dbQuery steps
+        // ({ engine: 'auto'|'postgresql'|'mysql'|'sqlserver' }). Preserved here
+        // so /generate-files can wire the right driver dependency + connection
+        // code; connection values come from env at run time, never stored.
+        dbConfig: (projectData.dbConfig && typeof projectData.dbConfig === 'object') ? projectData.dbConfig : null,
         metadata: {
           created: projectData.metadata?.created || new Date().toISOString(),
           updated: projectData.metadata?.updated || new Date().toISOString(),
