@@ -41,6 +41,7 @@ sample-export/recorded-flow-*/
 .env.local
 config/email.json
 config/credentials.json
+config/ai-config.json
 **/credentials.json
 
 # OS junk

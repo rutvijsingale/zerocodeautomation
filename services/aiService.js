@@ -44,8 +44,18 @@
  */
 
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const TAG = '[AI]';
+
+// [ZAC-FIX] Persisted AI config so a tester can wire an external API provider
+// (Qwen / OpenAI / DeepSeek / any OpenAI-compatible endpoint) from the Settings
+// tab and have it survive restarts. The file holds an API key, so it is
+// gitignored + written 0600 — same treatment as config/email.json.
+const _REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const AI_CONFIG_PATH = path.join(_REPO_ROOT, 'config', 'ai-config.json');
 
 const DEFAULT_OLLAMA_URL = process.env.ZAC_AI_BASE_URL || 'http://127.0.0.1:11434';
 const DEFAULT_MODEL = process.env.ZAC_AI_MODEL || 'mistral';
@@ -211,6 +221,133 @@ class OllamaProvider {
 }
 
 /* -------------------------------------------------------------------------- *
+ *  OpenAI-compatible provider (Qwen / OpenAI / DeepSeek / vLLM / etc.)        *
+ * -------------------------------------------------------------------------- */
+
+// [ZAC-FIX] Any provider exposing the OpenAI /v1/chat/completions contract can
+// be used here — Qwen (DashScope compatible-mode), OpenAI, DeepSeek, Groq,
+// Together, a self-hosted vLLM, etc. The tester supplies { baseUrl, apiKey,
+// model } from the Settings tab; the key is stored server-side only and never
+// returned by info().
+class OpenAICompatibleProvider {
+  /**
+   * @param {Object} opts
+   * @param {string} opts.baseUrl  e.g. https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+   * @param {string} opts.apiKey
+   * @param {string} opts.model    e.g. qwen-plus, gpt-4o-mini, deepseek-chat
+   */
+  constructor(opts = {}) {
+    this.baseUrl = String(opts.baseUrl || '').replace(/\/+$/, '');
+    this.apiKey = opts.apiKey || '';
+    this.model = opts.model || 'qwen-plus';
+    this.label = opts.label || 'openai-compatible';
+  }
+
+  available() { return !!(this.baseUrl && this.apiKey && this.model); }
+
+  // NOTE: never include apiKey here — this is surfaced to the browser.
+  info() {
+    return {
+      provider: 'openai-compatible',
+      model: this.model,
+      baseUrl: this.baseUrl,
+      apiKeySet: !!this.apiKey,
+      ...(this.available() ? {} : { reason: 'API provider not fully configured (need baseUrl, model, apiKey)' }),
+    };
+  }
+
+  /** POST {baseUrl}/chat/completions and return the assistant text. */
+  async _chat(prompt, system) {
+    const url = `${this.baseUrl}/chat/completions`;
+    const messages = [];
+    if (system) messages.push({ role: 'system', content: String(system).slice(0, 8 * 1024) });
+    messages.push({ role: 'user', content: String(prompt).slice(0, 8 * 1024) });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({ model: this.model, messages, temperature: 0.2 }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status} from ${this.baseUrl}: ${text.slice(0, 200)}`);
+      }
+      const j = await res.json();
+      return (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '';
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async suggestLocator(ctx) {
+    const failed = String(ctx?.failedSelector || '').slice(0, 500);
+    const hint = String(ctx?.elementHint || '').slice(0, 200);
+    const html = truncateHtml(ctx?.htmlSnippet || '');
+    const prompt = buildLocatorPrompt({ failed, hint, html });
+    try {
+      const raw = (await this._chat(prompt)).trim();
+      const suggestion = extractSelectorFromResponse(raw);
+      if (!suggestion) return { ok: false, reason: 'no parsable selector in model response', suggestion: null, confidence: 0, raw };
+      return { ok: true, suggestion, confidence: 70, raw };
+    } catch (err) {
+      console.warn(`${TAG} API call failed: ${err.message}`);
+      return { ok: false, reason: err.message, suggestion: null, confidence: 0, raw: '' };
+    }
+  }
+
+  async chat(ctx = {}) {
+    const userPrompt = String(ctx.prompt || '').slice(0, 8 * 1024);
+    if (!userPrompt) return { ok: false, reason: 'empty prompt', response: '', model: this.model, baseUrl: this.baseUrl };
+    const model = String(ctx.model || this.model);
+    try {
+      const response = await this._chat(userPrompt, ctx.system);
+      return { ok: true, response, model, baseUrl: this.baseUrl };
+    } catch (err) {
+      return { ok: false, reason: err.message, response: '', model, baseUrl: this.baseUrl };
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------- *
+ *  Persisted config (config/ai-config.json)                                  *
+ * -------------------------------------------------------------------------- */
+
+/** Read the persisted AI config, or null if none / unreadable. */
+function loadAiConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(AI_CONFIG_PATH, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** Persist AI config (0600 — it may hold an API key). */
+function saveAiConfig(cfg) {
+  fs.mkdirSync(path.dirname(AI_CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(AI_CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(AI_CONFIG_PATH, 0o600); } catch { /* best effort on non-POSIX */ }
+}
+
+/** Build a provider instance from a persisted config object. */
+function providerFromConfig(cfg) {
+  if (!cfg || !cfg.provider) return null;
+  if (cfg.provider === 'null') return new NullProvider('disabled via Settings');
+  if (cfg.provider === 'ollama') {
+    return new OllamaProvider({ baseUrl: cfg.baseUrl || DEFAULT_OLLAMA_URL, model: cfg.model || DEFAULT_MODEL });
+  }
+  if (cfg.provider === 'openai-compatible') {
+    return new OpenAICompatibleProvider({ baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model, label: cfg.label });
+  }
+  return null;
+}
+
+/* -------------------------------------------------------------------------- *
  *  Selection / auto-detect                                                   *
  * -------------------------------------------------------------------------- */
 
@@ -250,6 +387,19 @@ let _provider = null;
  */
 export async function getAiProvider() {
   if (_provider) return _provider;
+
+  // [ZAC-FIX] Persisted Settings config wins over env auto-detect, so an
+  // API provider (Qwen/OpenAI/…) chosen in the UI survives restarts.
+  const persisted = loadAiConfig();
+  if (persisted) {
+    const fromCfg = providerFromConfig(persisted);
+    if (fromCfg) {
+      _provider = fromCfg;
+      console.log(`${TAG} using persisted config: provider=${persisted.provider} model=${persisted.model || '-'}`);
+      return _provider;
+    }
+  }
+
   const explicit = (process.env.ZAC_AI_PROVIDER || '').toLowerCase();
 
   if (explicit === 'null') {
@@ -335,6 +485,71 @@ export async function setAiProvider(mode) {
     return { ok: true, mode: 'auto', info: fresh.info() };
   }
   return { ok: false, mode: m, reason: 'unknown mode (use on|off|auto)', info: { provider: 'unknown' } };
+}
+
+/**
+ * [ZAC-FIX] Full AI provider configuration from the Settings tab. Persists to
+ * config/ai-config.json, installs the provider, and probes it so the UI can
+ * show a clear success/failure. Supports the local Ollama daemon AND any
+ * OpenAI-compatible API (Qwen, OpenAI, DeepSeek, self-hosted vLLM, …).
+ *
+ * @param {Object} cfg
+ * @param {'null'|'ollama'|'openai-compatible'} cfg.provider
+ * @param {string} [cfg.baseUrl]
+ * @param {string} [cfg.model]
+ * @param {string} [cfg.apiKey]   only for openai-compatible; blank = keep existing
+ * @returns {Promise<{ ok:boolean, info:object, reason?:string }>}
+ */
+export async function setAiConfig(cfg = {}) {
+  const provider = String(cfg.provider || '').toLowerCase();
+  if (!['null', 'ollama', 'openai-compatible'].includes(provider)) {
+    return { ok: false, reason: 'provider must be null | ollama | openai-compatible', info: { provider: 'unknown' } };
+  }
+
+  if (provider === 'null') {
+    saveAiConfig({ provider: 'null' });
+    _provider = new NullProvider('disabled via Settings');
+    return { ok: true, info: _provider.info() };
+  }
+
+  if (provider === 'ollama') {
+    const baseUrl = (cfg.baseUrl || DEFAULT_OLLAMA_URL).trim();
+    const model = (cfg.model || DEFAULT_MODEL).trim();
+    saveAiConfig({ provider: 'ollama', baseUrl, model });
+    const candidate = new OllamaProvider({ baseUrl, model });
+    const reachable = await probeOllama(baseUrl);
+    _provider = reachable ? candidate : new NullProvider(`saved, but no Ollama reachable at ${baseUrl}`);
+    return { ok: reachable, info: candidate.info(), ...(reachable ? {} : { reason: _provider.info().reason }) };
+  }
+
+  // openai-compatible
+  const baseUrl = String(cfg.baseUrl || '').trim().replace(/\/+$/, '');
+  const model = String(cfg.model || '').trim();
+  // Blank apiKey means "keep the existing key" (so the UI never has to echo it).
+  const existing = loadAiConfig();
+  const apiKey = (cfg.apiKey && String(cfg.apiKey).trim()) ||
+    (existing && existing.provider === 'openai-compatible' ? existing.apiKey : '');
+  if (!baseUrl || !model || !apiKey) {
+    return { ok: false, reason: 'baseUrl, model and apiKey are all required for an API provider', info: { provider: 'openai-compatible', baseUrl, model, apiKeySet: !!apiKey } };
+  }
+  saveAiConfig({ provider: 'openai-compatible', baseUrl, model, apiKey });
+  const candidate = new OpenAICompatibleProvider({ baseUrl, apiKey, model });
+  // Probe with a tiny chat so the UI can confirm the key/endpoint work.
+  let ok = true, reason;
+  try {
+    const r = await candidate.chat({ prompt: 'Reply with the single word: ok' });
+    ok = !!r.ok;
+    if (!ok) reason = r.reason;
+  } catch (e) { ok = false; reason = e.message; }
+  _provider = candidate; // install regardless; available() gates usage
+  return { ok, info: candidate.info(), ...(ok ? {} : { reason }) };
+}
+
+/** Current persisted AI config with the API key masked (for the Settings UI). */
+export function getAiConfigMasked() {
+  const cfg = loadAiConfig() || { provider: process.env.ZAC_AI_PROVIDER || 'auto' };
+  const { apiKey, ...rest } = cfg;
+  return { ...rest, apiKeySet: !!apiKey };
 }
 
 /* -------------------------------------------------------------------------- *

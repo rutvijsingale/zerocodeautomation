@@ -5908,6 +5908,25 @@ router.post('/ai/toggle', asyncHandler(async (req, res) => {
   res.json(result);
 }));
 
+// [ZAC-FIX] Full AI provider configuration (Settings tab). Lets a tester wire
+// an external OpenAI-compatible API (Qwen / OpenAI / DeepSeek / vLLM / …) or the
+// local Ollama daemon, and have it persist across restarts.
+//   GET  → current config with the API key masked (never returned).
+//   POST → { provider, baseUrl?, model?, apiKey? }; installs + probes the
+//          provider and returns { ok, info, reason? }. Blank apiKey keeps the
+//          stored key so the UI never has to echo the secret.
+router.get('/ai/config', pollingRateLimiter, asyncHandler(async (req, res) => {
+  const { getAiConfigMasked } = await import('../services/aiService.js');
+  res.json({ ok: true, config: getAiConfigMasked() });
+}));
+
+router.post('/ai/config', strictRateLimiter, asyncHandler(async (req, res) => {
+  const { provider, baseUrl, model, apiKey } = req.body || {};
+  const { setAiConfig } = await import('../services/aiService.js');
+  const result = await setAiConfig({ provider, baseUrl, model, apiKey });
+  res.json(result);
+}));
+
 console.log('[API Routes] AI routes registered:');
 console.log('  GET    /api/ai/info');
 console.log('  POST   /api/ai/suggest-locator');

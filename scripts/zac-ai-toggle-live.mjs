@@ -89,9 +89,15 @@ async function readBadge(page) {
   await setPage.goto(`${BASE}/settings.html`, { waitUntil: 'networkidle' });
   await setPage.waitForTimeout(700);
 
-  // The native checkbox is visually hidden; click the styled label that
-  // proxies to it (matches the user's actual click target).
-  await setPage.locator('label[for="aiToggle"]').click();
+  // [ZAC-FIX] The two AI toggles were unified into one provider dropdown
+  // (#aiProvider) + Test & Save. Flip the state by picking the OPPOSITE of the
+  // current server state and saving: available → "null" (off); off → "ollama"
+  // (on, at the default local endpoint). Save posts /api/ai/config and fires
+  // the same cross-tab zac:ai-state-changed event the badges listen for.
+  const wasAvailable = !!initial.body?.available;
+  await setPage.selectOption('#aiProvider', wasAvailable ? 'null' : 'ollama');
+  await setPage.waitForTimeout(200);
+  await setPage.locator('#aiSaveBtn').click();
   // Settings toast / its own status updates locally; we care about cross-tab.
   await setPage.waitForTimeout(1500);  // toast + storage event window
 
@@ -146,9 +152,11 @@ async function readBadge(page) {
     badge2.trim().toLowerCase() === expected2.trim().toLowerCase(),
     `expected "${expected2}", got "${badge2}"`);
 
-  // Settings page checkbox: must also be in sync (cross-tab via ZacSettings)
-  const setChecked = await setPage.locator('#aiToggle').isChecked();
-  chk(`Settings #aiToggle reflects dashboard toggle without reload (checked=${setChecked} server.available=${after2.body?.available})`,
+  // Settings page: the (now hidden) #ollamaEnabled mirror must stay in sync
+  // cross-tab via ZacSettings — the unified panel replaced the visible toggle
+  // but zacFixes.js still keeps this element tracking server availability.
+  const setChecked = await setPage.locator('#ollamaEnabled').isChecked().catch(() => null);
+  chk(`Settings #ollamaEnabled mirror reflects dashboard toggle without reload (checked=${setChecked} server.available=${after2.body?.available})`,
     setChecked === !!after2.body?.available);
 
   // ─── Restore: bounce back to the original state ──────────────────────

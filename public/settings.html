@@ -202,81 +202,65 @@
 <h1>⚙️ Settings <span class="badge">additive — no recorder logic touched</span></h1>
 <p class="lede">All toggles below are non-intrusive: they affect new runs only, never an in-progress recording.</p>
 
-<!-- ────────── AI ────────── -->
-<div class="panel">
-  <h2>🧠 Local AI Engine</h2>
-  <p class="desc">
-    Powered by a locally-running Ollama daemon. <strong>No data leaves your machine.</strong>
-    When enabled, AI suggests replacement selectors when the recorder's
-    primary + fallback chain fails. Disabling it falls back to the
-    deterministic healer only — every existing test continues to work.
-  </p>
-
-  <div class="row">
-    <div class="info">
-      <div class="label">Enable local AI</div>
-      <div class="hint">Toggles the AI suggest-locator endpoint. The deterministic healer always runs first; AI only fires when ALL recorded fallbacks are exhausted.</div>
-    </div>
-    <div class="control">
-      <label class="switch" for="aiToggle">
-        <input type="checkbox" id="aiToggle" />
-        <span class="slider"></span>
-      </label>
-    </div>
-  </div>
-  <div class="status" id="aiStatus">checking…</div>
-
-  <div class="install-block" id="aiInstallHint" style="display:none;">
-    <strong>Local AI requires Ollama (one-time setup):</strong>
-    <code>brew install ollama
-ollama pull mistral
-ollama serve &amp;</code>
-    Then come back here and toggle ON. Nothing else changes.
-  </div>
-</div>
-
-<!-- ────────── [ZAC-FIX 8] AI Assistant (Ollama / Mistral) ────────── -->
+<!-- ────────── AI Engine (unified: local Ollama OR external API) ────────── -->
 <div class="panel" id="zac-ai-assistant-panel">
-  <h2>🤖 AI Assistant (Ollama)</h2>
+  <h2>🧠 AI Engine</h2>
   <p class="desc">
-    Cursor-style chat for fixing test code, locally. Toggle the panel anywhere with
-    <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd>. Backed by your own Ollama daemon —
-    no data leaves the machine, no API key required.
+    Powers selector-healing suggestions, locator ranking, error diagnosis and the
+    <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd> AI Assistant chat. Choose a provider:
+    a local <strong>Ollama</strong> daemon (no data leaves your machine), or any
+    <strong>OpenAI-compatible API</strong> — Qwen, OpenAI, DeepSeek, Groq, a self-hosted
+    vLLM, etc. The deterministic healer always runs first; AI only fires when the
+    recorded fallbacks are exhausted, so turning this Off never breaks a test.
   </p>
 
-  <div class="row">
-    <div class="info">
-      <div class="label">Enable AI Assistant panel</div>
-      <div class="hint">When on, a floating panel is available on Recording, Dashboard and Settings tabs.</div>
-    </div>
-    <div class="control">
-      <label class="switch" for="ollamaEnabled">
-        <input type="checkbox" id="ollamaEnabled" data-zac-bind="ollamaEnabled" />
-        <span class="slider"></span>
-      </label>
-    </div>
-  </div>
+  <div class="email-form">
+    <label for="aiProvider">Provider</label>
+    <select id="aiProvider" style="width:100%;padding:8px;border-radius:8px;background:rgba(13,17,23,0.6);border:1px solid var(--border);color:var(--text);">
+      <option value="null">Off — deterministic healer only</option>
+      <option value="ollama">Local — Ollama (on-device, no API key)</option>
+      <option value="openai-compatible">External API — OpenAI-compatible (Qwen, OpenAI, DeepSeek…)</option>
+    </select>
 
-  <div class="email-form" style="margin-top:8px;">
-    <label for="ollamaEndpoint">Ollama endpoint</label>
-    <input type="text" id="ollamaEndpoint" data-zac-bind="ollamaEndpoint" placeholder="http://localhost:11434" autocomplete="off" />
-
-    <label for="ollamaModel">Model name</label>
-    <input type="text" id="ollamaModel" data-zac-bind="ollamaModel" placeholder="mistral" autocomplete="off" />
-
-    <div class="row-inline" style="margin-top:8px;">
-      <button type="button" id="zacOllamaTestBtn">Test Connection</button>
-      <button type="button" id="zacOllamaSaveBtn">Save</button>
-      <span class="status" id="zacOllamaStatus" style="margin-left:auto;">idle</span>
-    </div>
-  </div>
-
-  <div class="install-block">
-    <strong>Windows / first-run setup:</strong>
-    <code>ollama serve
+    <!-- Ollama fields -->
+    <div id="aiOllamaFields" style="display:none;margin-top:10px;">
+      <label for="ollamaEndpoint">Ollama endpoint</label>
+      <input type="text" id="ollamaEndpoint" data-zac-bind="ollamaEndpoint" placeholder="http://localhost:11434" autocomplete="off" />
+      <label for="ollamaModel">Model name</label>
+      <input type="text" id="ollamaModel" data-zac-bind="ollamaModel" placeholder="mistral" autocomplete="off" />
+      <div class="install-block">
+        <strong>First-run:</strong> <code>ollama serve
 ollama pull mistral</code>
-    The endpoint must be HTTP (not HTTPS) — local Ollama does not use TLS.
-    Calls go to localhost from <code>http://localhost:3000</code> so there are no CORS issues.
+        Endpoint must be HTTP (local Ollama has no TLS). Calls proxy through this
+        server so there are no CORS issues.
+      </div>
+    </div>
+
+    <!-- External API fields -->
+    <div id="aiApiFields" style="display:none;margin-top:10px;">
+      <label for="aiApiBaseUrl">API base URL</label>
+      <input type="text" id="aiApiBaseUrl" placeholder="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" autocomplete="off" />
+      <label for="aiApiModel">Model</label>
+      <input type="text" id="aiApiModel" placeholder="qwen-plus" autocomplete="off" />
+      <label for="aiApiKey">API key</label>
+      <input type="password" id="aiApiKey" placeholder="(unchanged — leave blank to keep the saved key)" autocomplete="new-password" />
+      <small>
+        Must expose the OpenAI <code>/chat/completions</code> contract. The key is stored
+        <strong>server-side only</strong> (<code>config/ai-config.json</code>, mode 0600, gitignored)
+        and is never sent back to the browser. Connection examples: Qwen
+        <code>…/compatible-mode/v1</code> + <code>qwen-plus</code>; OpenAI
+        <code>https://api.openai.com/v1</code> + <code>gpt-4o-mini</code>.
+      </small>
+    </div>
+
+    <!-- Hidden — kept so the floating AI Assistant panel + cross-tab sync
+         (aiAssistant.js / dashboard / zacFixes.js) keep tracking availability. -->
+    <input type="checkbox" id="ollamaEnabled" data-zac-bind="ollamaEnabled" style="display:none;" />
+
+    <div class="row-inline" style="margin-top:12px;">
+      <button type="button" class="btn primary" id="aiSaveBtn">Test &amp; Save</button>
+      <span class="status" id="aiConfigStatus" style="margin-left:auto;">checking…</span>
+    </div>
   </div>
 </div>
 

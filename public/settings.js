@@ -6,55 +6,104 @@
     setTimeout(() => t.remove(), 4500);
   }
 
-  // ── AI toggle ──────────────────────────────────────────────────
-  async function syncAiState() {
+  // ── AI Engine (unified: Off / local Ollama / external OpenAI-compatible API) ──
+  // [ZAC-FIX] Replaces the two duplicate AI panels (a "Local AI Engine" toggle
+  // and a separate "AI Assistant (Ollama)" panel). One provider dropdown drives
+  // POST /api/ai/config; the deterministic healer + floating assistant keep
+  // working via /api/ai/info (mirrored to ZacSettings by zacFixes.js).
+  const aiProviderSel = document.getElementById('aiProvider');
+  function aiEl(id) { return document.getElementById(id); }
+  function renderAiFields() {
+    const p = aiProviderSel ? aiProviderSel.value : 'null';
+    const ollama = aiEl('aiOllamaFields');
+    const api = aiEl('aiApiFields');
+    if (ollama) ollama.style.display = (p === 'ollama') ? 'block' : 'none';
+    if (api) api.style.display = (p === 'openai-compatible') ? 'block' : 'none';
+  }
+  function setAiStatus(msg, kind) {
+    const s = aiEl('aiConfigStatus');
+    if (!s) return;
+    s.textContent = msg;
+    s.className = 'status ' + (kind || '');
+  }
+  async function loadAiConfig() {
+    if (!aiProviderSel) return;
     try {
-      const info = await (await fetch('/api/ai/info')).json();
-      const cb = document.getElementById('aiToggle');
-      const status = document.getElementById('aiStatus');
-      const hint = document.getElementById('aiInstallHint');
-      cb.checked = !!info.available;
-      if (info.available) {
-        status.textContent = `✓ on — provider: ${info.provider}, model: ${info.model}, base: ${info.baseUrl}`;
-        status.className = 'status ok';
-        hint.style.display = 'none';
+      const [cfgR, infoR] = await Promise.all([
+        fetch('/api/ai/config').then((r) => r.json()).catch(() => null),
+        fetch('/api/ai/info').then((r) => r.json()).catch(() => null),
+      ]);
+      const cfg = (cfgR && cfgR.config) || {};
+      // Map stored provider onto the dropdown ('auto' → show as Off until set).
+      const prov = ['null', 'ollama', 'openai-compatible'].includes(cfg.provider) ? cfg.provider : 'null';
+      aiProviderSel.value = prov;
+      if (prov === 'ollama') {
+        if (aiEl('ollamaEndpoint') && cfg.baseUrl) aiEl('ollamaEndpoint').value = cfg.baseUrl;
+        if (aiEl('ollamaModel') && cfg.model) aiEl('ollamaModel').value = cfg.model;
+      } else if (prov === 'openai-compatible') {
+        if (aiEl('aiApiBaseUrl') && cfg.baseUrl) aiEl('aiApiBaseUrl').value = cfg.baseUrl;
+        if (aiEl('aiApiModel') && cfg.model) aiEl('aiApiModel').value = cfg.model;
+      }
+      renderAiFields();
+      if (infoR && infoR.available) {
+        setAiStatus(`✓ on — ${infoR.provider} / ${infoR.model} @ ${infoR.baseUrl}`, 'ok');
       } else {
-        status.textContent = `off — ${info.reason || 'no AI provider configured'}`;
-        status.className = 'status warn';
-        hint.style.display = 'block';
+        setAiStatus(`off — ${(infoR && infoR.reason) || 'no AI provider configured'}`, 'warn');
       }
     } catch (e) {
-      const s = document.getElementById('aiStatus');
-      s.textContent = 'failed to read /api/ai/info: ' + e.message;
-      s.className = 'status error';
+      setAiStatus('failed to read AI config: ' + e.message, 'error');
     }
   }
-  document.getElementById('aiToggle').addEventListener('change', async (e) => {
-    const cb = e.currentTarget;
-    cb.disabled = true;
-    const target = cb.checked ? 'on' : 'off';
-    try {
-      const r = await (await fetch('/api/ai/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: target }),
-      })).json();
-      if (target === 'on' && !r.ok) {
-        cb.checked = false;
-        showToast(r.reason || 'Could not enable AI', 'error');
-      } else {
-        showToast(target === 'on'
-          ? `AI enabled — ${r.info.provider}/${r.info.model}`
-          : 'AI disabled', target === 'on' ? 'ok' : 'info');
+  if (aiProviderSel) {
+    aiProviderSel.addEventListener('change', renderAiFields);
+    const saveBtn = aiEl('aiSaveBtn');
+    if (saveBtn) saveBtn.addEventListener('click', async () => {
+      const provider = aiProviderSel.value;
+      const payload = { provider };
+      if (provider === 'ollama') {
+        payload.baseUrl = (aiEl('ollamaEndpoint')?.value || '').trim();
+        payload.model = (aiEl('ollamaModel')?.value || '').trim();
+      } else if (provider === 'openai-compatible') {
+        payload.baseUrl = (aiEl('aiApiBaseUrl')?.value || '').trim();
+        payload.model = (aiEl('aiApiModel')?.value || '').trim();
+        payload.apiKey = (aiEl('aiApiKey')?.value || '').trim(); // blank = keep stored key
       }
-    } catch (e) {
-      cb.checked = !cb.checked;
-      showToast('Toggle failed: ' + e.message, 'error');
-    } finally {
-      cb.disabled = false;
-      syncAiState();
-    }
-  });
+      saveBtn.disabled = true;
+      setAiStatus('testing & saving…', '');
+      try {
+        const r = await (await fetch('/api/ai/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })).json();
+        if (r.ok) {
+          showToast('AI provider saved', 'ok');
+          if (aiEl('aiApiKey')) aiEl('aiApiKey').value = ''; // never keep the secret in the field
+        } else {
+          showToast(r.reason || 'Could not enable AI provider', 'error');
+        }
+        // [ZAC-FIX] Propagate cross-tab. Writing ZacSettings.ollamaEnabled fires
+        // the localStorage `storage` event that OTHER tabs (Recording badge,
+        // Dashboard, floating assistant) listen on — the unified panel replaced
+        // the old #aiToggle which used to do this. Mirror endpoint/model too.
+        try {
+          const nowAvailable = !!r.ok && provider !== 'null';
+          if (window.ZacSettings) {
+            const patch = { ollamaEnabled: nowAvailable };
+            if (provider === 'ollama') { patch.ollamaEndpoint = payload.baseUrl; patch.ollamaModel = payload.model; }
+            window.ZacSettings.set(patch);
+          }
+        } catch (_) {}
+        // Same-tab consumers refresh immediately off this event.
+        try { window.dispatchEvent(new CustomEvent('zac:ai-state-changed')); } catch (_) {}
+      } catch (e) {
+        showToast('Save failed: ' + e.message, 'error');
+      } finally {
+        saveBtn.disabled = false;
+        loadAiConfig();
+      }
+    });
+  }
 
   // ── Default framework ──────────────────────────────────────────
   // [ZAC-FIX] More defensive than the original: surfaces population count
@@ -300,7 +349,7 @@
   syncCaptureUI();
 
   // ── Boot ───────────────────────────────────────────────────────
-  syncAiState();
+  loadAiConfig();
   loadFrameworks();
   loadServerInfo();
   loadEmailConfig();

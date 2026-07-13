@@ -244,15 +244,25 @@ function summariseSignals(page, label) {
     await page.goto(`${BASE}/settings.html`, { waitUntil: 'networkidle' });
     summariseSignals(page, 'settings.html');
 
-    // Two AI toggles — server is source of truth, both must mirror.
-    chk('Settings: Local AI Engine toggle #aiToggle',
-      await page.locator('#aiToggle').count() > 0);
-    chk('Settings: AI Assistant (Ollama) toggle #ollamaEnabled',
-      await page.locator('#ollamaEnabled').count() > 0);
+    // [ZAC-FIX] Unified AI Engine panel — the two duplicate toggles (a
+    // "Local AI Engine" #aiToggle and a separate "AI Assistant (Ollama)"
+    // #ollamaEnabled panel) were consolidated into ONE provider dropdown that
+    // also supports an external OpenAI-compatible API (Qwen / OpenAI / …).
+    chk('Settings: AI provider dropdown #aiProvider',
+      await page.locator('#aiProvider').count() > 0);
+    const aiProviderOpts = await page.locator('#aiProvider option').count();
+    chk(`Settings: provider dropdown has off/ollama/api options (${aiProviderOpts})`,
+      aiProviderOpts >= 3);
     chk('Settings: Ollama endpoint input #ollamaEndpoint',
       await page.locator('#ollamaEndpoint').count() > 0);
     chk('Settings: Ollama model input #ollamaModel',
       await page.locator('#ollamaModel').count() > 0);
+    chk('Settings: external-API base URL #aiApiBaseUrl',
+      await page.locator('#aiApiBaseUrl').count() > 0);
+    chk('Settings: external-API model #aiApiModel',
+      await page.locator('#aiApiModel').count() > 0);
+    chk('Settings: external-API key #aiApiKey (password)',
+      await page.locator('#aiApiKey[type="password"]').count() > 0);
 
     // Default framework dropdown — must be populated from /api/frameworks
     await page.waitForTimeout(800);
@@ -269,37 +279,29 @@ function summariseSignals(page, label) {
     chk('Settings: Save button',
       await page.locator('button:has-text("Save"), #saveSettings').count() > 0);
 
-    // Behavioural: hit /api/ai/info on load
-    chk('Settings: hit /api/ai/info on load',
-      page._zacApiCalls.some(c => c.includes('/api/ai/info')),
+    // Behavioural: reads AI state on load (config + info).
+    chk('Settings: hit /api/ai/info or /api/ai/config on load',
+      page._zacApiCalls.some(c => c.includes('/api/ai/info') || c.includes('/api/ai/config')),
       `api calls: ${page._zacApiCalls.slice(0,5).join(', ')}`);
 
-    // Behavioural: toggling AI fires /api/ai/toggle. Click the visible
-    // <label class="switch" for="aiToggle"> — the underlying #aiToggle
-    // input is intentionally hidden by the slider UI, so .click() on
-    // the input directly never fires the change event.
+    // Behavioural: selecting a provider reveals the matching field group.
+    await page.selectOption('#aiProvider', 'openai-compatible');
+    await page.waitForTimeout(200);
+    const apiVisible = await page.locator('#aiApiFields').isVisible().catch(() => false);
+    chk('Settings: choosing External API reveals the API fields', apiVisible);
+    await page.selectOption('#aiProvider', 'ollama');
+    await page.waitForTimeout(200);
+    const ollamaVisible = await page.locator('#aiOllamaFields').isVisible().catch(() => false);
+    chk('Settings: choosing Local Ollama reveals the Ollama fields', ollamaVisible);
+
+    // Behavioural: Test & Save posts to /api/ai/config (leaves the sensible
+    // machine default — local Ollama — selected).
     page._zacApiCalls.length = 0;
-    const beforeChecked = await page.locator('#aiToggle').isChecked();
-    await page.locator('label[for="aiToggle"]').click();
-    await page.waitForTimeout(1000);
-    const toggled = page._zacApiCalls.some(c => c.includes('/api/ai/toggle'));
-    chk('Settings: clicking AI toggle hits /api/ai/toggle', toggled,
+    await page.locator('#aiSaveBtn').click();
+    await page.waitForTimeout(1200);
+    chk('Settings: Test & Save hits /api/ai/config',
+      page._zacApiCalls.some(c => c.includes('/api/ai/config')),
       `api calls: ${page._zacApiCalls.slice(0,3).join(', ')}`);
-
-    // Behavioural: AI mirror — flipping #aiToggle should keep
-    // #ollamaEnabled in lockstep (the "two toggles, one truth" rule).
-    const main   = await page.locator('#aiToggle').isChecked().catch(() => null);
-    const mirror = await page.locator('#ollamaEnabled').isChecked().catch(() => null);
-    chk('Settings: #aiToggle and #ollamaEnabled mirror each other',
-      main === mirror,
-      `aiToggle=${main}, ollamaEnabled=${mirror}`);
-
-    // Restore original AI state so we don't leave the box in a
-    // toggled state that affects subsequent test runs.
-    if (main !== beforeChecked) {
-      await page.locator('label[for="aiToggle"]').click();
-      await page.waitForTimeout(800);
-    }
 
     await ctx.close();
   }
