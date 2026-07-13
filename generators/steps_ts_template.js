@@ -239,6 +239,29 @@ And(/^I double click "${escapedDesc}"$/, async function(this: PlaywrightWorld) {
   });
 
   code += `
+// [ZAC-FIX] JS-executor click — clicks via the page's own JS engine, bypassing
+// overlay/interceptor issues that break a normal locator.click().
+And('I click {string} using JavaScript', async function(this: PlaywrightWorld, selector: string) {
+  await this.page.locator(selector).evaluate((el: HTMLElement) => el.click());
+});
+
+// [ZAC-FIX] DB query assertion — runs SQL against an env-configured connection
+// (defaults to an in-memory SQLite DB for zero setup) and asserts row count.
+// Requires the better-sqlite3 dependency (added to package.json when a dbQuery
+// step is present). Swap the driver/env for your target database.
+And('I run DB query {string} expecting {int} rows', async function(this: PlaywrightWorld, sql: string, expectedRows: number) {
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(process.env.DB_FILE || ':memory:');
+  try {
+    const rows = db.prepare(sql).all();
+    if (rows.length !== expectedRows) {
+      throw new Error(\`DB row count mismatch for [\${sql}]: expected \${expectedRows} but got \${rows.length}\`);
+    }
+  } finally {
+    db.close();
+  }
+});
+
 // Typing
 When('I type {string} into {string}', async function(this: PlaywrightWorld, value: string, selector: string) {
   await this.page.fill(selector, value);

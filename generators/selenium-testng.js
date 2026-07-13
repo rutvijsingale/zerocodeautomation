@@ -304,7 +304,7 @@ function locatorsJava({ steps }) {
   return lines.join('\n');
 }
 
-function testClassJava({ className, baseUrl, steps }) {
+function testClassJava({ className, baseUrl, steps, scenarios }) {
   const lines = [];
   lines.push('import io.github.bonigarcia.wdm.WebDriverManager;');
   lines.push('import org.openqa.selenium.By;');
@@ -402,14 +402,36 @@ function testClassJava({ className, baseUrl, steps }) {
   lines.push('    }');
   lines.push('  }');
   lines.push('');
+  // [ZAC-FIX] When scenario structure is available, emit one @Test method per
+  // scenario (with @DataProvider for Scenario Outlines) instead of collapsing
+  // everything into a single method. The locator-name seed is shared across
+  // all methods so the generated names stay aligned with the Locators map,
+  // which is built from the same flat step order.
+  const seedRef = { n: 0 };
+  if (Array.isArray(scenarios) && scenarios.length) {
+    emitScenarioMethods({ lines, scenarios, baseUrl, seedRef });
+    lines.push(`}`);
+    lines.push('');
+    return lines.join('\n');
+  }
+
   lines.push(`  @Test(description = "Recorded flow → ${escapeJavaString(className)}")`);
   lines.push(`  public void test${className}() {`);
   lines.push(`    driver.get("${escapeJavaString(baseUrl || 'about:blank')}");`);
+  emitStepStatements({ lines, steps, seedRef });
+  lines.push(`  }`);
+  lines.push(`}`);
+  lines.push('');
+  return lines.join('\n');
+}
 
-  let nameSeed = 0;
+// [ZAC-FIX] Shared step-statement emitter. `examples` (when set) lets a value
+// that matches a Scenario-Outline example column be substituted with a lookup
+// into the DataProvider row (row.get("col")) instead of a hard-coded literal.
+function emitStepStatements({ lines, steps, seedRef, examples = null }) {
   for (const step of steps) {
     const kind = step.kind || step.action;
-    const name = (step.normalizedDescription || step.description || `step${++nameSeed}`)
+    const name = (step.normalizedDescription || step.description || `step${++seedRef.n}`)
       .replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').toLowerCase();
 
     switch (kind) {
@@ -425,11 +447,14 @@ function testClassJava({ className, baseUrl, steps }) {
       }
       case 'type': {
         // CredentialsHelper.resolve handles the ${VAR} placeholder; the
-        // value is never echoed to logs.
-        const valueLit = `"${escapeJavaString(step.value || '')}"`;
+        // value is never echoed to logs. [ZAC-FIX] In a Scenario Outline, a
+        // value that matches an Examples column is read from the DataProvider
+        // row instead of being hard-coded.
+        const typeCol = colForValue(step.value, examples);
+        const valueExpr = typeCol ? `row.get("${escapeJavaString(typeCol)}")` : `"${escapeJavaString(step.value || '')}"`;
         lines.push(`    {`);
         lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
-        lines.push(`      String resolved = CredentialsHelper.resolve(${valueLit});`);
+        lines.push(`      String resolved = CredentialsHelper.resolve(${valueExpr});`);
         lines.push(`      e.clear();`);
         lines.push(`      e.sendKeys(resolved);`);
         lines.push(`    }`);
@@ -456,6 +481,32 @@ function testClassJava({ className, baseUrl, steps }) {
         lines.push(`    {`);
         lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
         lines.push(`      new org.openqa.selenium.interactions.Actions(driver).doubleClick(e).perform();`);
+        lines.push(`    }`);
+        break;
+      }
+      // [ZAC-FIX] JS-executor click — bypasses overlay/interceptor issues.
+      case 'jsClick': {
+        lines.push(`    {`);
+        lines.push(`      WebElement e = page.findWithHealing(Locators.CHAINS.get("${name}"));`);
+        lines.push(`      ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("arguments[0].click();", e);`);
+        lines.push(`    }`);
+        break;
+      }
+      // [ZAC-FIX] DB query assertion — env-configured JDBC (defaults to
+      // in-memory H2 for zero-setup), assert row count via TestNG Assert.
+      case 'dbQuery': {
+        const sql = escapeJavaString(step.query || step.value || 'SELECT 1');
+        const expectedRows = Number.isFinite(Number(step.expectedRows)) ? Number(step.expectedRows) : 1;
+        lines.push(`    {`);
+        lines.push(`      String dbUrl  = System.getenv().getOrDefault("DB_URL", "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1");`);
+        lines.push(`      String dbUser = System.getenv().getOrDefault("DB_USER", "sa");`);
+        lines.push(`      String dbPass = System.getenv().getOrDefault("DB_PASS", "");`);
+        lines.push(`      try (java.sql.Connection c = java.sql.DriverManager.getConnection(dbUrl, dbUser, dbPass);`);
+        lines.push(`           java.sql.Statement st = c.createStatement();`);
+        lines.push(`           java.sql.ResultSet rs = st.executeQuery("${sql}")) {`);
+        lines.push(`        int count = 0; while (rs.next()) count++;`);
+        lines.push(`        Assert.assertEquals(count, ${expectedRows}, "DB row count mismatch for [${sql}]");`);
+        lines.push(`      } catch (java.sql.SQLException ex) { throw new RuntimeException(ex); }`);
         lines.push(`    }`);
         break;
       }
@@ -545,11 +596,61 @@ function testClassJava({ className, baseUrl, steps }) {
         lines.push(`    // [unsupported] step kind="${escapeJavaString(kind || 'unknown')}" — skipped`);
     }
   }
+}
 
-  lines.push(`  }`);
-  lines.push(`}`);
-  lines.push('');
-  return lines.join('\n');
+// [ZAC-FIX] Return the example column whose recorded values include `value`,
+// so a Scenario-Outline step value can be swapped for a DataProvider lookup.
+function colForValue(value, examples) {
+  if (!examples || !examples.length || value == null || value === '') return null;
+  for (const col of Object.keys(examples[0] || {})) {
+    if (examples.some((row) => String(row[col]) === String(value))) return col;
+  }
+  return null;
+}
+
+// [ZAC-FIX] Emit one @Test method per scenario. Scenario Outlines become a
+// @DataProvider (rows from the Examples table) + a data-driven @Test that
+// receives a Map<String,String> row; step values matching an example column
+// are read from the row. Plain scenarios become a simple @Test.
+function emitScenarioMethods({ lines, scenarios, baseUrl, seedRef }) {
+  const used = new Set();
+  scenarios.forEach((sc, idx) => {
+    const steps = Array.isArray(sc.steps) ? sc.steps : [];
+    let method = safeJavaIdentifier(sc.title || sc.name || `scenario${idx + 1}`);
+    if (!method) method = `scenario${idx + 1}`;
+    method = `test${method}`;
+    while (used.has(method)) method = `${method}_${idx + 1}`;
+    used.add(method);
+    const desc = escapeJavaString(sc.title || sc.name || `Scenario ${idx + 1}`);
+    const isOutline = sc.useScenarioOutline && Array.isArray(sc.examples) && sc.examples.length > 0;
+
+    if (isOutline) {
+      const cols = Object.keys(sc.examples[0] || {});
+      const dp = `${method}Data`;
+      lines.push(`  @org.testng.annotations.DataProvider(name = "${dp}")`);
+      lines.push(`  public Object[][] ${dp}() {`);
+      lines.push(`    return new Object[][] {`);
+      sc.examples.forEach((row) => {
+        const entries = cols.map((c) => `put("${escapeJavaString(c)}", "${escapeJavaString(String(row[c]))}");`).join(' ');
+        lines.push(`      { new java.util.HashMap<String,String>() {{ ${entries} }} },`);
+      });
+      lines.push(`    };`);
+      lines.push(`  }`);
+      lines.push(`  @Test(dataProvider = "${dp}", description = "${desc}")`);
+      lines.push(`  public void ${method}(java.util.Map<String,String> row) {`);
+      lines.push(`    driver.get("${escapeJavaString(baseUrl || 'about:blank')}");`);
+      emitStepStatements({ lines, steps, seedRef, examples: sc.examples });
+      lines.push(`  }`);
+      lines.push('');
+    } else {
+      lines.push(`  @Test(description = "${desc}")`);
+      lines.push(`  public void ${method}() {`);
+      lines.push(`    driver.get("${escapeJavaString(baseUrl || 'about:blank')}");`);
+      emitStepStatements({ lines, steps, seedRef });
+      lines.push(`  }`);
+      lines.push('');
+    }
+  });
 }
 
 function locatorsJson({ steps }) {
@@ -639,17 +740,28 @@ export function generateProject(ctx) {
   const projectName = ctx.projectName || 'recorded-project';
   const className = safeJavaIdentifier(ctx.featureTitle || ctx.featureName || projectName);
   const steps = Array.isArray(ctx.steps) ? ctx.steps : [];
+  // [ZAC-FIX] Optional scenario structure — enables per-scenario @Test methods
+  // and @DataProvider-driven Scenario Outlines. Only use scenarios that
+  // actually carry steps; otherwise fall back to the flat step list.
+  const scenarios = (Array.isArray(ctx.scenarios) ? ctx.scenarios : [])
+    .filter((s) => s && Array.isArray(s.steps) && s.steps.length > 0);
   const baseUrl = ctx.baseUrl || (steps.find((s) => s?.kind === 'navigate')?.url) || 'about:blank';
+
+  // [ZAC-FIX] The Locators map must be built from the SAME step order that the
+  // test methods emit, or findWithHealing lookups miss. When we render
+  // per-scenario methods, the names come from the scenarios flattened in
+  // order; otherwise from the flat step list.
+  const locatorSteps = scenarios.length ? scenarios.flatMap((s) => s.steps) : steps;
 
   const files = {
     'pom.xml': pomXml({ projectName }),
     'src/test/resources/testng.xml': testngXml({ className }),
-    [`src/test/java/${className}Test.java`]: testClassJava({ className, baseUrl, steps }),
+    [`src/test/java/${className}Test.java`]: testClassJava({ className, baseUrl, steps, scenarios }),
     'src/test/java/support/BasePage.java': basePageJava(),
     'src/test/java/support/CredentialsHelper.java': credentialsHelperJava(),
-    'src/test/java/support/Locators.java': locatorsJava({ steps }),
-    'locators.json': locatorsJson({ steps }),
-    'README.md': readme({ projectName, className, baseUrl, stepCount: steps.length }),
+    'src/test/java/support/Locators.java': locatorsJava({ steps: locatorSteps }),
+    'locators.json': locatorsJson({ steps: locatorSteps }),
+    'README.md': readme({ projectName, className, baseUrl, stepCount: locatorSteps.length }),
   };
 
   return {

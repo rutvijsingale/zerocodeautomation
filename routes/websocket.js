@@ -176,7 +176,7 @@ export const handleActionCapture = async (req, res) => {
     // kinds (`click`, `type`) but carry sidecar metadata. They don't need
     // new entries here — the kind itself is still allowed.
     const allowedKinds = [
-      'click', 'doubleClick', 'type', 'select', 'check', 'uncheck', 'selectRadio',
+      'click', 'doubleClick', 'jsClick', 'type', 'select', 'check', 'uncheck', 'selectRadio',
       'navigate', 'assertText', 'assertVisible', 'assertNotVisible', 'assertAttribute', 'assertCount',
       'assertValue', 'assertEnabled', 'assertDisabled', 'assertChecked', 'assertNotChecked',
       'waitFor', 'waitForSelector', 'screenshot', 'hover',
@@ -184,6 +184,8 @@ export const handleActionCapture = async (req, res) => {
       'download', 'popup',
       // Page-boundary markers (ZAC-FIX 2026-06-01).
       'pageBoundary', 'newPage',
+      // [ZAC-FIX] db-query assertion step (manually added, not recorded).
+      'dbQuery',
     ];
 
     // T2.8 — auto-suggested assertions take a side-channel. They are

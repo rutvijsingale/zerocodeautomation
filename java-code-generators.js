@@ -460,6 +460,11 @@ function generateJavaStepDefinitions(framework, stepDefMap, groupedActions, base
     'And I wait for selector {string}': true,
     'And I take screenshot {string}': true,
     'And I call API {word} {string}': true,
+    // [ZAC-FIX] JS-executor click variant — for elements a native click can't
+    // reach (overlays/interceptors). Complements the Actions-class doubleClick.
+    'And I click {string} using JavaScript': true,
+    // [ZAC-FIX] DB assertion step — run a SQL query and assert row count.
+    'And I run DB query {string} expecting {int} rows': true,
   };
   
   // Merge common steps with stepDefMap
@@ -1448,7 +1453,54 @@ function generateJavaStepDefinitions(framework, stepDefMap, groupedActions, base
     lines.push('    }');
     lines.push('');
   }
-  
+
+  // [ZAC-FIX] JS-executor click — clicks via the browser's own JS engine,
+  // bypassing overlay/interceptor issues that break a native .click().
+  if (stepDefMap['And I click {string} using JavaScript']) {
+    lines.push('    @And("I click {string} using JavaScript")');
+    lines.push('    public void iClickElementUsingJavaScript(String elementDescription) {');
+    if (framework === 'playwright-java') {
+      lines.push('        try {');
+      lines.push('            getPage().locator(elementDescription).evaluate("el => el.click()");');
+      lines.push('        } catch (Exception e) {');
+      lines.push('            getPage().locator("text=" + elementDescription).evaluate("el => el.click()");');
+      lines.push('        }');
+    } else {
+      lines.push('        WebElement element;');
+      lines.push('        try {');
+      lines.push('            element = getDriver().findElement(By.cssSelector(elementDescription));');
+      lines.push('        } catch (Exception e) {');
+      lines.push('            element = getDriver().findElement(By.xpath("//*[contains(text(), \'" + elementDescription + "\')]"));');
+      lines.push('        }');
+      lines.push('        ((org.openqa.selenium.JavascriptExecutor) getDriver()).executeScript("arguments[0].click();", element);');
+    }
+    lines.push('    }');
+    lines.push('');
+  }
+
+  // [ZAC-FIX] DB query assertion — env-configured JDBC connection, assert row
+  // count. Connection comes from DB_URL/DB_USER/DB_PASS (defaults to an
+  // in-memory H2 so the generated test runs with zero external setup). Uses
+  // AssertionError so no test-assertion library dependency is required.
+  if (stepDefMap['And I run DB query {string} expecting {int} rows']) {
+    lines.push('    @And("I run DB query {string} expecting {int} rows")');
+    lines.push('    public void iRunDbQueryExpectingRows(String sql, int expectedRows) throws Exception {');
+    lines.push('        String url  = System.getenv().getOrDefault("DB_URL", "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1");');
+    lines.push('        String user = System.getenv().getOrDefault("DB_USER", "sa");');
+    lines.push('        String pass = System.getenv().getOrDefault("DB_PASS", "");');
+    lines.push('        try (java.sql.Connection conn = java.sql.DriverManager.getConnection(url, user, pass);');
+    lines.push('             java.sql.Statement st = conn.createStatement();');
+    lines.push('             java.sql.ResultSet rs = st.executeQuery(sql)) {');
+    lines.push('            int count = 0;');
+    lines.push('            while (rs.next()) count++;');
+    lines.push('            if (count != expectedRows) {');
+    lines.push('                throw new AssertionError("DB row count mismatch for [" + sql + "]: expected " + expectedRows + " but got " + count);');
+    lines.push('            }');
+    lines.push('        }');
+    lines.push('    }');
+    lines.push('');
+  }
+
   // Select dropdown - Generate only once, prefer "When" over "And"
   if ((stepDefMap['When I select {string} from {string}'] || stepDefMap['And I select {string} from {string}']) && 
       !isStepGenerated('I select {string} from {string}')) {

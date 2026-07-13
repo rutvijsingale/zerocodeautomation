@@ -86,6 +86,23 @@ export function generatePlaywrightSpec({ featureTitle, baseUrl, steps = [] }) {
       case 'doubleClick':
         spec += toLine(`  await page.dblclick(${JSON.stringify(step.selector)});`);
         break;
+      case 'jsClick':
+        // [ZAC-FIX] JS-executor click — bypasses overlay/interceptor issues.
+        spec += toLine(`  await page.locator(${JSON.stringify(step.selector)}).evaluate(el => el.click());`);
+        break;
+      case 'dbQuery': {
+        // [ZAC-FIX] DB assertion — env-configured SQLite (zero-setup), row count.
+        const dbSql = step.query || step.value || 'SELECT 1';
+        const dbRows = Number.isFinite(Number(step.expectedRows)) ? Number(step.expectedRows) : 1;
+        spec += toLine(`  {`);
+        spec += toLine(`    const Database = (await import('better-sqlite3')).default;`);
+        spec += toLine(`    const _db = new Database(process.env.DB_FILE || ':memory:');`);
+        spec += toLine(`    const _rows = _db.prepare(${JSON.stringify(dbSql)}).all();`);
+        spec += toLine(`    expect(_rows.length).toBe(${dbRows});`);
+        spec += toLine(`    _db.close();`);
+        spec += toLine(`  }`);
+        break;
+      }
       default:
         spec += toLine(`  // TODO Unsupported step: ${JSON.stringify(step)}`);
     }

@@ -18,6 +18,16 @@ export const STEP_PATTERNS = {
     stepDefPattern: 'When(\'I click {string}\', ...)',
     parameters: ['selector']
   },
+  jsClick: {
+    featurePattern: 'And I click "{selector}" using JavaScript',
+    stepDefPattern: 'And(\'I click {string} using JavaScript\', ...)',
+    parameters: ['selector']
+  },
+  dbQuery: {
+    featurePattern: 'And I run DB query "{query}" expecting {int} rows',
+    stepDefPattern: 'And(\'I run DB query {string} expecting {int} rows\', ...)',
+    parameters: ['query', 'expectedRows']
+  },
   type: {
     featurePattern: 'And I type "{value}" into "{selector}"',
     stepDefPattern: 'And(\'I type {string} into {string}\', ...)',

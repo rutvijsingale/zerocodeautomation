@@ -200,6 +200,17 @@ function generateStepLine(step, usePlaceholders = false, examples = []) {
       const desc = step.normalizedDescription || step.selector || 'Element';
       return `    And I double click "${desc}"`;
     }
+    case 'jsClick': {
+      const desc = step.normalizedDescription || step.selector || 'Element';
+      return `    And I click "${desc}" using JavaScript`;
+    }
+    case 'dbQuery': {
+      // DB assertion step (manually added). Verifies a SQL query returns the
+      // expected number of rows against an env-configured connection.
+      const sql = (step.query || step.value || 'SELECT 1').replace(/"/g, "'");
+      const rows = Number.isFinite(Number(step.expectedRows)) ? Number(step.expectedRows) : 1;
+      return `    And I run DB query "${sql}" expecting ${rows} rows`;
+    }
     case 'select': {
       const desc = step.normalizedDescription || step.selector || 'Dropdown';
       const realVal = step.value || step.selectedText || '';

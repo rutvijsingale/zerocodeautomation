@@ -4172,6 +4172,34 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
     const isJavaFramework = finalFramework === 'playwright-java' || finalFramework === 'selenium-java';
     const generatedFiles = [];
 
+    // [ZAC-FIX] Detect a dbQuery step (flat or under scenarios) so we can wire
+    // the zero-setup DB driver dependency into the build file only when needed.
+    const _allStepsForScan = [
+      ...steps,
+      ...((Array.isArray(projectData.scenarios) ? projectData.scenarios : [])
+        .flatMap((s) => (s && Array.isArray(s.steps)) ? s.steps : [])),
+    ];
+    const hasDbStep = _allStepsForScan.some((s) => s && (s.kind || s.action) === 'dbQuery');
+    const H2_POM_DEP = `        <!-- [ZAC] H2 in-memory DB for dbQuery steps (zero-setup). Swap for your JDBC driver + set DB_URL/DB_USER/DB_PASS. -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>2.2.224</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>`;
+    const injectH2 = (pom) => hasDbStep && typeof pom === 'string'
+      ? pom.replace(/\n\s*<\/dependencies>/, '\n' + H2_POM_DEP) : pom;
+    const injectSqlite = (pkg) => {
+      if (!hasDbStep || typeof pkg !== 'string') return pkg;
+      try {
+        const j = JSON.parse(pkg);
+        j.dependencies = j.dependencies || {};
+        if (!j.dependencies['better-sqlite3']) j.dependencies['better-sqlite3'] = '^11.3.0';
+        return JSON.stringify(j, null, 2);
+      } catch { return pkg; }
+    };
+
     // Prepare all file generation tasks in parallel
     const fileWritePromises = [];
 
@@ -4198,10 +4226,21 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
         featureName: finalFeatureName,
         baseUrl: finalBaseUrl,
         steps: testngSteps,
+        // [ZAC-FIX] Pass scenario structure so the generator can emit one
+        // @Test per scenario + @DataProvider for Scenario Outlines — but ONLY
+        // when the flat step list is empty (a pure multi-scenario project).
+        // When flat steps exist they are the authoritative full recording
+        // (which may include steps not mirrored into any scenario slice, e.g.
+        // scroll/waitFor), so we keep the single-@Test path over testngSteps
+        // and must not drop those steps by switching to per-scenario emission.
+        scenarios: (steps && steps.length)
+          ? []
+          : (Array.isArray(projectData.scenarios) ? projectData.scenarios : []),
         tags: finalTags,
         browserType: finalBrowserType,
       });
       const { files = {}, surfaced = {} } = result || {};
+      if (files['pom.xml']) files['pom.xml'] = injectH2(files['pom.xml']); // [ZAC-FIX] DB driver dep
       for (const [relPath, content] of Object.entries(files)) {
         const absPath = path.join(projectDir, relPath);
         await fileService.ensureDirectory(path.dirname(absPath));
@@ -4233,7 +4272,7 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
       await fileService.ensureDirectory(srcTestResources);
       
       // Generate Maven pom.xml (parallel)
-      const pomXml = javaGenerators.generateMavenPom(finalFramework, projectName, finalBaseUrl);
+      const pomXml = injectH2(javaGenerators.generateMavenPom(finalFramework, projectName, finalBaseUrl));
       const pomPath = path.join(projectDir, 'pom.xml');
       fileWritePromises.push(
         fileService.writeFile(pomPath, pomXml).then(() => {
@@ -4435,7 +4474,7 @@ router.post('/projects/:projectId/generate-files', strictRateLimiter, asyncHandl
       };
 
       // Generate TypeScript/JavaScript project (parallel file writes)
-      const pkgJson = stepsGenerator.generatePackageJson({ projectName: projectName });
+      const pkgJson = injectSqlite(stepsGenerator.generatePackageJson({ projectName: projectName }));
       const pkgPath = path.join(projectDir, 'package.json');
       fileWritePromises.push(
         fileService.writeFile(pkgPath, pkgJson).then(() => {
