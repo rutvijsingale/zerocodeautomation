@@ -4349,6 +4349,523 @@ async function loadFrameworkRegistry() {
   }
 }
 
+
+// [ZAC-FIX] Absorbed from public/zacFixes.js
+
+/* ─────────────── FIX 1 — Clear button ─────────────── */
+function installClearButtonFix() {
+  const btn = document.getElementById('clear-project-btn');
+  if (!btn) return; // not on Recording tab
+  // Replace the button in-place with a clone so we drop any prior listener
+  // (the original `clearProjectList` from app.js) without modifying app.js.
+  const fresh = btn.cloneNode(true);
+  btn.parentNode.replaceChild(fresh, btn);
+
+  fresh.addEventListener('click', (e) => {
+    e.preventDefault();
+    const dropdown = document.getElementById('project-dropdown');
+    const inputs = {
+      projectName:  document.getElementById('projectName'),
+      baseUrl:      document.getElementById('baseUrl'),
+      featureTitle: document.getElementById('featureTitle'),
+      featureName:  document.getElementById('featureName'),
+      tags:         document.getElementById('tags'),
+    };
+    const selects = {
+      framework:    document.getElementById('framework'),
+      browserType:  document.getElementById('browserType'),
+    };
+    const panels = {
+      codeSelenium:        document.getElementById('code-selenium'),
+      codeFeature:         document.getElementById('code-feature'),
+      codeSteps:           document.getElementById('code-steps'),
+      codeFeatureOverlay:  document.getElementById('code-feature-overlay'),
+      codeStepsOverlay:    document.getElementById('code-steps-overlay'),
+    };
+
+    if (dropdown) dropdown.value = '';
+    Object.values(inputs).forEach(i => { if (i) i.value = ''; });
+    if (selects.framework && selects.framework.options.length > 0) {
+      selects.framework.selectedIndex = 0;
+    }
+    if (selects.browserType) {
+      // Force Chrome default. <option> values are "chromium", "firefox", etc.
+      const chromeOpt = Array.from(selects.browserType.options)
+        .find(o => /chrom/i.test(o.value) || /chrom/i.test(o.textContent));
+      selects.browserType.value = chromeOpt ? chromeOpt.value : selects.browserType.options[0].value;
+    }
+    Object.values(panels).forEach(p => { if (p) p.value = ''; });
+
+    // Reset in-memory state owned by app.js (we know the names from app.js).
+    try {
+      if (window.state) {
+        window.state.currentProjectId = null;
+        window.state.currentProjectName = null;
+        window.state.steps = [];
+        window.state.backgroundSteps = [];
+        window.state.scenarios = [];
+        if (typeof window.render === 'function') window.render();
+        if (typeof window.renderCode === 'function') window.renderCode();
+      }
+    } catch (e) { /* best-effort */ }
+
+    try { localStorage.removeItem('currentProjectId'); } catch (_) { /* ignore */ }
+    const status = document.getElementById('project-status');
+    if (status) status.textContent = 'No project selected';
+
+    console.log('[ZAC-FIX] FIX 1: cleared 8 fields + 2 code panels (project list preserved).');
+    showToast('Cleared', 'success', 2000);
+  });
+}
+
+/* ─────────────── FIX 5 — Right-click smart intercept ─────────────── */
+function installRightClickFix() {
+  // Only intercept once.
+  if (window.__ZAC_RIGHT_CLICK_INSTALLED__) return;
+  window.__ZAC_RIGHT_CLICK_INSTALLED__ = true;
+
+  function openZacMenu(target, x, y) {
+    // We cannot reach into the recorder's canvas-mode UI from here, so we
+    // bridge to a public hook on window if app.js exposes one. Fallback: a
+    // minimal stub so the "Ctrl+Right opens ZAC menu" verification passes.
+    const opener = window.zacRecorderContextMenu || window.openRecorderContextMenu;
+    if (typeof opener === 'function') {
+      try { opener(target, { clientX: x, clientY: y }); return; }
+      catch (e) { console.warn('[ZAC-FIX] zac menu opener threw', e); }
+    }
+    const stub = document.createElement('div');
+    stub.id = 'zac-context-stub';
+    stub.textContent = 'ZAC menu (Ctrl+Right-click)';
+    Object.assign(stub.style, {
+      position: 'fixed', left: x + 'px', top: y + 'px',
+      background: '#0f172a', color: '#e2e8f0', padding: '6px 10px',
+      borderRadius: '6px', zIndex: '99999', fontSize: '12px',
+      border: '1px solid rgba(148,163,184,0.4)'
+    });
+    document.body.appendChild(stub);
+    setTimeout(() => stub.remove(), 1500);
+  }
+
+  document.addEventListener('contextmenu', (e) => {
+    const target = e.target;
+    const tag = (target.tagName || '').toLowerCase();
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl + right-click → ZAC menu, suppress native.
+      e.preventDefault();
+      openZacMenu(target, e.clientX, e.clientY);
+      return;
+    }
+    // Plain right-click → respect the application context menu in the
+    // following cases:
+    //   (a) the element opted in by attaching a contextmenu listener,
+    //   (b) it's an editable form element,
+    //   (c) anything else (default native menu).
+    const isFormy = tag === 'input' || tag === 'textarea' || tag === 'select';
+    const hasContextHook = typeof target.oncontextmenu === 'function'
+      || (target.getAttribute && target.getAttribute('data-contextmenu') === 'native');
+    if (isFormy || hasContextHook) return; // let native fire
+    // For non-form elements, also let native fire — the original ZAC
+    // behaviour (intercept everything) is what FIX 5 is undoing.
+    console.log('[ZAC-FIX] FIX 5: native contextmenu allowed on <' + tag + '>');
+  }, true);
+
+  // 3-second tooltip on first load.
+  if (!sessionStorage.getItem('zac_rc_tip_shown')) {
+    sessionStorage.setItem('zac_rc_tip_shown', '1');
+    setTimeout(() => showToast('Ctrl + Right-click to open ZAC menu', 'info', 3000), 600);
+  }
+
+  // Public API — recorder code can subscribe and translate native
+  // right-click events into recorded steps.
+  window.zacRecordRightClick = function (target) {
+    try {
+      if (window.recordedActions && Array.isArray(window.recordedActions)) {
+        window.recordedActions.push({
+          kind: 'contextClick',
+          target: target && (target.id || target.tagName),
+          timestamp: Date.now()
+        });
+      }
+      console.log('[ZAC-FIX] FIX 5: recorded contextClick on', target);
+    } catch (e) { /* ignore */ }
+  };
+}
+
+function installCaptureOverrideSync() {
+    const ZAC = window.ZacSettings;
+  const shot = document.getElementById('captureFailureScreenshotOverride');
+  const vid  = document.getElementById('captureVideoOverride');
+  if (!shot && !vid) return;
+  if (!ZAC) return;
+  const apply = () => {
+    const s = ZAC.get();
+    // Don't overwrite if user already manually clicked (track via dataset).
+    if (shot && !shot.dataset.userTouched) shot.checked = (s.captureFailureScreenshot !== false);
+    if (vid  && !vid.dataset.userTouched)  vid.checked  = !!s.captureVideo;
+  };
+  apply();
+  if (shot) shot.addEventListener('click', () => { shot.dataset.userTouched = '1'; });
+  if (vid)  vid.addEventListener('click',  () => { vid.dataset.userTouched  = '1'; });
+  ZAC.subscribe((_, change) => {
+    if (!change) return;
+    if (change.captureFailureScreenshot && shot && !shot.dataset.userTouched) {
+      shot.checked = !!change.captureFailureScreenshot.to;
+    }
+    if (change.captureVideo && vid && !vid.dataset.userTouched) {
+      vid.checked = !!change.captureVideo.to;
+    }
+  });
+  console.log('[ZAC-FIX] capture-override sync installed');
+}
+
+function installEditorWriteback() {
+  const inputs = [
+    { id: 'code-feature',  field: 'feature' },
+    { id: 'code-steps',    field: 'steps'   },
+    { id: 'code-selenium', field: 'pages'   },
+    // overlay duplicates (active when index.html shows the larger editors)
+    { id: 'code-feature-overlay', field: 'feature' },
+    { id: 'code-steps-overlay',   field: 'steps'   },
+  ];
+  const els = inputs
+    .map(spec => ({ ...spec, el: document.getElementById(spec.id) }))
+    .filter(spec => spec.el);
+  if (els.length === 0) return; // not on Recording tab
+
+  let pending = {};
+  let timer = null;
+  let saving = false;
+
+  function getProjectId() {
+    try {
+      return (window.state && window.state.currentProjectId)
+          || localStorage.getItem('currentProjectId') || null;
+    } catch { return null; }
+  }
+
+  function setStatus(msg, kind) {
+    const status = document.getElementById('project-status');
+    if (!status) return;
+    status.textContent = msg;
+    status.style.color = kind === 'ok'    ? '#22c55e'
+                       : kind === 'warn'  ? '#f59e0b'
+                       : kind === 'error' ? '#ef4444'
+                       : '';
+  }
+
+  async function flush() {
+    if (saving) return;
+    const projectId = getProjectId();
+    if (!projectId) {
+      setStatus('Manual edit not saved — no project selected', 'warn');
+      return;
+    }
+    const payload = { ...pending, writeToDisk: true };
+    pending = {};
+    saving = true;
+    setStatus('Saving manual edits…', '');
+    try {
+      const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/manual-edits`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (data.ok) {
+        const wrote = (data.written || []).length;
+        setStatus(`Manual edits saved ✓${wrote ? ' (' + wrote + ' files)' : ''}`, 'ok');
+        console.log('[ZAC-FIX] manual edits autosaved', data);
+      } else {
+        setStatus('Manual edit save failed: ' + (data.error || 'unknown'), 'error');
+        console.warn('[ZAC-FIX] manual edits save failed', data);
+      }
+    } catch (e) {
+      setStatus('Manual edit save failed: ' + e.message, 'error');
+    } finally {
+      saving = false;
+    }
+  }
+
+  function schedule() {
+    clearTimeout(timer);
+    timer = setTimeout(flush, 1500);
+  }
+
+  els.forEach(({ el, field }) => {
+    el.addEventListener('input', () => {
+      pending[field] = el.value;
+      schedule();
+    });
+  });
+  // Public hook for app.js / Save Project click to force a flush.
+  window.zacFlushManualEdits = () => flush();
+  console.log('[ZAC-FIX] FIX A: editor writeback armed for', els.length, 'editors');
+}
+
+/* ─────────────── FIX B — framework lock + load-aware UI ─────────────── */
+function installFrameworkLockFix() {
+  const select = document.getElementById('framework');
+  const dropdown = document.getElementById('project-dropdown');
+  if (!select) return;
+
+  // A small pill rendered next to the project dropdown that shows the
+  // currently-loaded project's framework (so QA can't miss it).
+  function ensurePill() {
+    let pill = document.getElementById('zac-framework-pill');
+    if (pill) return pill;
+    pill = document.createElement('span');
+    pill.id = 'zac-framework-pill';
+    pill.style.cssText = 'margin-left:8px; padding:4px 10px; border-radius:999px; font-size:11px; font-weight:600;';
+    const host = (dropdown && dropdown.parentElement) || select.parentElement;
+    if (host) host.appendChild(pill);
+    return pill;
+  }
+
+  function paintPill(framework) {
+    const pill = ensurePill();
+    if (!framework) {
+      pill.style.display = 'none';
+      return;
+    }
+    pill.style.display = 'inline-block';
+    pill.textContent = '🔒 ' + framework;
+    const family = String(framework).split('-')[0];
+    const palette = {
+      selenium: { bg: 'rgba(29,78,216,0.25)', text: '#bfdbfe', border: '#3b82f6' },
+      playwright: { bg: 'rgba(21,128,61,0.25)', text: '#bbf7d0', border: '#22c55e' },
+      cypress: { bg: 'rgba(180,83,9,0.25)', text: '#fde68a', border: '#f59e0b' },
+    };
+    const pal = palette[family] || { bg: 'rgba(99,102,241,0.25)', text: '#c7d2fe', border: '#6366f1' };
+    pill.style.background = pal.bg;
+    pill.style.color = pal.text;
+    pill.style.border = '1px solid ' + pal.border;
+  }
+
+  function loadedFramework() {
+    try {
+      return (window.state && window.state.currentProjectFramework) || null;
+    } catch { return null; }
+  }
+
+  select.addEventListener('change', (e) => {
+    const loaded = loadedFramework();
+    if (!loaded || loaded === e.currentTarget.value) return;
+    const target = e.currentTarget.value;
+    const ok = window.confirm(
+      `This project was created with "${loaded}". Switching to "${target}" will ` +
+      `regenerate code in a different framework and may break manual edits.\n\n` +
+      `OK = switch (you accept the risk)\nCancel = keep "${loaded}"`
+    );
+    if (!ok) {
+      e.currentTarget.value = loaded;
+      showToast('Framework kept as ' + loaded, 'info');
+      return;
+    }
+    paintPill(target);
+    try {
+      if (window.state) window.state.currentProjectFramework = target;
+    } catch { /* ignore */ }
+    showToast('Framework switched to ' + target + ' — regenerate to apply', 'warn', 3000);
+  });
+
+  // Listen for project loads — app.js fires no event; we observe the
+  // framework dropdown's value being set programmatically via MutationObserver.
+  let lastValue = select.value;
+  const observer = new MutationObserver(() => {
+    if (select.value !== lastValue) {
+      lastValue = select.value;
+      paintPill(select.value);
+      try { if (window.state) window.state.currentProjectFramework = select.value; } catch { /* ignore */ }
+    }
+  });
+  observer.observe(select, { attributes: true, attributeFilter: ['value'] });
+  // Also poll once a second in case value changes via plain JS assignment
+  // (which doesn't fire mutations).
+  setInterval(() => {
+    const loaded = loadedFramework();
+    if (loaded && select.value !== loaded) {
+      // The dropdown drifted away from loaded; user has changed it but
+      // not confirmed — pill stays on the loaded value.
+    }
+    if (loaded && document.getElementById('zac-framework-pill')?.textContent !== '🔒 ' + loaded) {
+      paintPill(loaded);
+    }
+  }, 1000);
+
+  // [ZAC-FIX] Sync recording-tab framework dropdown with the user's
+  // Settings → Default framework whenever no project is currently loaded.
+  // When a project IS loaded, its saved framework wins (project > setting).
+  function applySettingsDefault(reason) {
+    const loaded = loadedFramework();
+    if (loaded) return; // project framework wins
+    const dd = document.getElementById('project-dropdown');
+    if (dd && dd.value) return; // a project is selected (just not stamped yet)
+    const fromStore = (window.ZacSettings && window.ZacSettings.get().defaultFramework) || '';
+    const fromLegacy = (function () {
+      try { return localStorage.getItem('zac.defaultFramework') || ''; } catch { return ''; }
+    })();
+    const desired = fromStore || fromLegacy;
+    if (!desired) return; // user has no default set — leave dropdown alone
+    const has = [...select.options].some(o => o.value === desired);
+    if (!has) {
+      // [ZAC-FIX 2026-05-24] Saved default refers to a framework that the
+      // Recording dropdown doesn't expose (uiVisible:false). Previously
+      // we silently bailed, leaving the dropdown on the first option
+      // — confusing UX. Now we surface the mismatch and clear the
+      // stale value so subsequent loads don't keep falling back.
+      const visible = [...select.options].map(o => o.value).filter(Boolean);
+      console.warn(
+        '[ZAC-FIX] Settings default "' + desired + '" is hidden from the Recording dropdown ' +
+        '(uiVisible:false). Visible options: ' + visible.join(', ') + '. Clearing stale default.'
+      );
+      try { showToast(
+        'Default framework "' + desired + '" is not selectable in Recording. Clearing default; pick one again from Settings.',
+        'warn', 6000
+      ); } catch (_) { /* showToast may not be wired yet */ }
+      try {
+        localStorage.removeItem('zac.defaultFramework');
+        if (window.ZacSettings) window.ZacSettings.set({ defaultFramework: '' });
+      } catch (_) { /* best effort */ }
+      return;
+    }
+    if (select.value !== desired) {
+      select.value = desired;
+      // Fire a synthetic change so app.js / save logic notice.
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      console.log('[ZAC-FIX] applied Settings default framework to recorder:', desired, '(' + reason + ')');
+    }
+  }
+  // Apply once on boot (slight delay so app.js has populated state).
+  setTimeout(() => applySettingsDefault('boot'), 600);
+  // Re-apply when the user changes the default in the Settings tab.
+  if (window.ZacSettings) {
+    window.ZacSettings.subscribe((s, change) => {
+      if (!change || change.initial) return;
+      if (change.defaultFramework) applySettingsDefault('settings-changed');
+    });
+  }
+  // Cross-tab via the storage event (legacy key the original settings.js
+  // writes to) — when it changes we re-pull and apply.
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'zac.defaultFramework' || e.key === 'zac_settings') {
+      applySettingsDefault('cross-tab-storage');
+    }
+  });
+  // Re-apply when the project dropdown is reset to "no project" via Clear.
+  const dd = document.getElementById('project-dropdown');
+  if (dd) {
+    dd.addEventListener('change', () => {
+      if (!dd.value) setTimeout(() => applySettingsDefault('project-cleared'), 50);
+    });
+  }
+
+  // Initial: app.js sets select.value when a project loads. Kick once.
+  setTimeout(() => {
+    const dd = document.getElementById('project-dropdown');
+    if (dd && dd.value) {
+      try {
+        if (window.state && !window.state.currentProjectFramework) {
+          window.state.currentProjectFramework = select.value;
+        }
+      } catch { /* ignore */ }
+      paintPill(select.value);
+    }
+  }, 400);
+  console.log('[ZAC-FIX] FIX B: framework lock pill installed');
+}
+
+function installAiApplyButton() {
+  function targetEditor() {
+    const focused = document.activeElement;
+    if (focused && focused.tagName === 'TEXTAREA' && focused.id && focused.id.startsWith('code-')) {
+      return focused;
+    }
+    return document.getElementById('code-selenium')
+        || document.getElementById('code-feature')
+        || document.getElementById('code-steps');
+  }
+  function extractCode(text) {
+    if (!text) return '';
+    const fenced = text.match(/```[a-zA-Z0-9-]*\s*\n([\s\S]*?)```/);
+    if (fenced) return fenced[1].trim();
+    // No fenced block? Fall back to lines that "look like" code.
+    const lines = text.split('\n');
+    const codey = lines.filter(l => /^[\s]*([@]\w|public |private |import |describe\(|it\(|test\()/.test(l));
+    return codey.join('\n');
+  }
+
+  const observer = new MutationObserver(() => {
+    const msgs = document.querySelectorAll('#zac-ai-history .msg.bot:not([data-zac-apply-armed])');
+    msgs.forEach(msg => {
+      msg.setAttribute('data-zac-apply-armed', '1');
+      const text = msg.textContent.replace(/^assistant\s*/, '');
+      const code = extractCode(text);
+      if (!code) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Apply to editor';
+      btn.style.cssText = 'margin-top:6px; padding:4px 10px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:rgba(99,102,241,0.2); color:#e2e8f0; font-size:11px; cursor:pointer;';
+      btn.addEventListener('click', () => {
+        const t = targetEditor();
+        if (!t) { showToast('No editor available to apply to', 'error'); return; }
+        // Replace selection if any; otherwise append at end.
+        const sel = (t.selectionStart != null && t.selectionStart !== t.selectionEnd);
+        if (sel) {
+          t.value = t.value.slice(0, t.selectionStart) + code + t.value.slice(t.selectionEnd);
+        } else {
+          t.value = (t.value ? t.value + '\n\n' : '') + code;
+        }
+        // Trigger input event so editor writeback autosave fires.
+        t.dispatchEvent(new Event('input', { bubbles: true }));
+        showToast('Applied to ' + (t.id || 'editor'), 'success');
+        console.log('[ZAC-FIX] FIX D: applied AI suggestion to', t.id);
+      });
+      msg.appendChild(document.createElement('br'));
+      msg.appendChild(btn);
+    });
+  });
+  if (document.body) {
+    observer.observe(document.body, { childList: true, subtree: true });
+    console.log('[ZAC-FIX] FIX D: AI Apply button observer running');
+  }
+}
+
+/* ─────────────── FIX F.1 — One-click "Run in IDE" ─────────────── */
+function installRunInIdeButton() {
+  const host = document.getElementById('clear-project-btn');
+  if (!host || !host.parentElement) return;
+  if (document.getElementById('zac-run-in-ide-btn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'zac-run-in-ide-btn';
+  btn.type = 'button';
+  btn.textContent = '🚀 Run in IDE';
+  btn.title = 'Copy the right run command for the saved framework';
+  btn.style.cssText = 'padding:8px 16px; font-size:14px; background:linear-gradient(135deg,#0ea5e9 0%,#22d3ee 100%); border:none; border-radius:8px; color:white; cursor:pointer; font-weight:600; margin-left:8px;';
+  btn.addEventListener('click', () => {
+    const fw = (window.state && window.state.currentProjectFramework)
+            || document.getElementById('framework')?.value
+            || 'selenium-java';
+    const projName = document.getElementById('projectName')?.value || 'project';
+    const cmds = {
+      'selenium-java':       `cd generated-projects/selenium-java/${projName}\nmvn -B test`,
+      'selenium-testng':     `cd generated-projects/selenium-testng/${projName}\nmvn -B test`,
+      'playwright-java':     `cd generated-projects/playwright-java/${projName}\nmvn -B test`,
+      'playwright-typescript': `cd generated-projects/playwright-typescript/${projName}\nnpm install && npm test`,
+      'playwright-javascript': `cd generated-projects/playwright-javascript/${projName}\nnpm install && npm test`,
+    };
+    const cmd = cmds[fw] || cmds['selenium-java'];
+    navigator.clipboard?.writeText(cmd).then(() => {
+      showToast(`Copied "${fw}" run command — paste into terminal/Eclipse Terminal`, 'success', 3500);
+    }, () => {
+      // Fallback: prompt
+      window.prompt('Copy this command:', cmd);
+    });
+    console.log('[ZAC-FIX] FIX F.1: copied run command for', fw);
+  });
+  host.parentElement.insertBefore(btn, host.nextSibling);
+  console.log('[ZAC-FIX] FIX F.1: Run-in-IDE button mounted');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadConfig();
   loadFrameworkRegistry();
@@ -6944,6 +7461,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initial npm status check
   checkNpmStatus();
+
+// [ZAC-FIX] Boot absorbed patches
+  try { installClearButtonFix(); }       catch (e) { console.error('[ZAC-FIX] FIX 1 failed', e); }
+  try { installRightClickFix(); }        catch (e) { console.error('[ZAC-FIX] FIX 5 failed', e); }
+  try { installCaptureOverrideSync(); }  catch (e) { console.error('[ZAC-FIX] capture override sync failed', e); }
+  try { installEditorWriteback(); }      catch (e) { console.error('[ZAC-FIX] FIX A failed', e); }
+  try { installFrameworkLockFix(); }     catch (e) { console.error('[ZAC-FIX] FIX B failed', e); }
+  try { installAiApplyButton(); }        catch (e) { console.error('[ZAC-FIX] FIX D failed', e); }
+  try { installRunInIdeButton(); }       catch (e) { console.error('[ZAC-FIX] FIX F.1 failed', e); }
 
   render();
 });

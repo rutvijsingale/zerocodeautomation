@@ -1220,3 +1220,528 @@
   // existing best-effort `window.load?.()` actually works.
   try { if (typeof window !== 'undefined') window.load = load; } catch (_) {}
   window.addEventListener('zac-runs:changed', () => load());
+
+  // [ZAC-FIX] Absorbed from public/zacFixes.js
+
+  function installDashboardFilters() {
+    const isDashboard = /dashboard\.html/.test(location.pathname);
+    if (!isDashboard) return;
+
+    // 1. Remove the legacy parallel toolbar if a previous session left it.
+    const orphan = document.getElementById('zac-fix6-filters');
+    if (orphan) orphan.remove();
+
+    const fwSelect = document.getElementById('filterFramework');
+    const filterBar = document.querySelector('#view-runs .filter-bar');
+    if (!fwSelect || !filterBar) return; // dashboard markup changed
+
+    // 2. Add Test Runner select + CSV button into the existing bar (idempotent).
+    if (!document.getElementById('zacRunnerFilter')) {
+      const trLabel = document.createElement('label');
+      trLabel.setAttribute('for', 'zacRunnerFilter');
+      trLabel.textContent = 'Runner:';
+      const trSelect = document.createElement('select');
+      trSelect.id = 'zacRunnerFilter';
+      trSelect.innerHTML = '<option value="">all</option>';
+      // Insert just after #filterFramework so the order reads:
+      // Framework → Runner → Project → Status → Search.
+      fwSelect.insertAdjacentElement('afterend', trSelect);
+      fwSelect.insertAdjacentElement('afterend', trLabel);
+
+      const csvBtn = document.createElement('button');
+      csvBtn.id = 'zacRunsCsvBtn';
+      csvBtn.type = 'button';
+      csvBtn.textContent = '⬇ CSV';
+      csvBtn.title = 'Export filtered rerun history to CSV (framework + test_runner columns)';
+      csvBtn.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid rgba(148,163,184,0.3);background:rgba(99,102,241,0.18);color:#e2e8f0;cursor:pointer;font-size:11px;';
+      filterBar.appendChild(csvBtn);
+    }
+
+    const trSelect = document.getElementById('zacRunnerFilter');
+    const csvBtn = document.getElementById('zacRunsCsvBtn');
+
+    // 3. Populate framework dropdown from /api/dashboard/framework-summary
+    //    (only frameworks ZAC actually has projects for, with project count).
+    async function syncFrameworkOptions() {
+      try {
+        const url = '/api/dashboard/framework-summary' + (window.zacIncludeOrphans ? '?existingOnly=false' : '');
+        const r = await fetch(url);
+        if (!r.ok) return;
+        const data = await r.json();
+        if (!data.ok) return;
+        const current = fwSelect.value;
+        // dashboard.js already populates #filterFramework on every load();
+        // we OVERWRITE its options after a short delay so our richer labels
+        // (with project count) win and stale frameworks get pruned.
+        const live = data.frameworks.filter(f => f.projectCount > 0 || f.totalReruns > 0);
+        const options = ['<option value="">all frameworks</option>'];
+        if (live.length === 0) {
+          options.push('<option value="" disabled>— no recordings saved yet —</option>');
+        } else {
+          for (const f of live) {
+            const runsBadge = f.totalReruns > 0 ? ` · ${f.totalReruns} runs` : '';
+            options.push(`<option value="${f.framework}">${f.framework} · ${f.projectCount} projects${runsBadge}</option>`);
+          }
+        }
+        fwSelect.innerHTML = options.join('');
+        // Restore the user's prior selection if it's still valid.
+        if (current && live.some(f => f.framework === current)) fwSelect.value = current;
+      } catch (e) { /* leave whatever dashboard.js put there */ }
+    }
+
+    // 4. Populate test-runner dropdown from /api/runs/history actual rows.
+    //    When the history is empty we add a single disabled "(no runs yet)"
+    //    option after "all runners" so QA understands the dropdown isn't
+    //    broken — it just hasn't seen any reruns yet.
+    async function syncRunnerOptions() {
+      if (!trSelect) return;
+      try {
+        // [ZAC-FIX 2026-05-24] Honour the "Include orphan projects"
+        // toggle. By default the server filters out runner rows
+        // belonging to deleted projects, so the dropdown shows only
+        // runners that match existing projects (no more "unknown" /
+        // "mocha" leftovers from harness runs). When the toggle is
+        // on, expose the full historical log for forensic browsing.
+        const includeOrphans = !!window.zacIncludeOrphans;
+        const url = '/api/runs/history?limit=500' + (includeOrphans ? '&existingOnly=false' : '');
+        const r = await fetch(url);
+        if (!r.ok) return;
+        const data = await r.json();
+        if (!data.ok) return;
+        const runners = new Set();
+        for (const row of data.rows) {
+          if (row.test_runner) runners.add(row.test_runner);
+        }
+        const current = trSelect.value;
+        const sorted = Array.from(runners).sort();
+        const opts = ['<option value="">all runners</option>'];
+        if (sorted.length === 0) {
+          opts.push('<option value="" disabled>— no rerun history yet —</option>');
+        } else {
+          opts.push(...sorted.map(rn => `<option value="${rn}">${rn}</option>`));
+        }
+        trSelect.innerHTML = opts.join('');
+        if (current && runners.has(current)) trSelect.value = current;
+      } catch (e) { /* leave the dropdown alone */ }
+    }
+
+    // 5. Apply filters to rendered tables (Recent activity + All reruns).
+    const PALETTE = {
+      selenium:   { bg: '#1d4ed8', text: '#dbeafe' },
+      playwright: { bg: '#15803d', text: '#dcfce7' },
+      cypress:    { bg: '#b45309', text: '#fef3c7' },
+    };
+    function tagAndPaintRows() {
+      const tableHosts = ['#rerunTableHost', '#recentActivityHost'];
+      const fw = fwSelect.value;
+      const tr = trSelect ? trSelect.value : '';
+      tableHosts.forEach(sel => {
+        document.querySelectorAll(sel + ' tbody tr').forEach(row => {
+          // Tag (idempotent): the Browser/Framework column is the 4th in
+          // both renderRerunTable and recentActivity (after Run/Project/Feature).
+          if (!row.dataset.framework) {
+            const cell = row.children[3];
+            const fwText = cell ? cell.textContent.trim() : '';
+            if (fwText && fwText !== '—') row.dataset.framework = fwText;
+          }
+          // Test runner is inferred from framework name.
+          if (!row.dataset.testRunner && row.dataset.framework) {
+            row.dataset.testRunner = inferTestRunner(row.dataset.framework);
+          }
+          // Coloured badge.
+          if (row.dataset.framework && !row.querySelector('.zac-fw-badge')) {
+            const family = row.dataset.framework.split('-')[0];
+            const pal = PALETTE[family] || { bg: '#475569', text: '#e2e8f0' };
+            const lastCell = row.children[row.children.length - 1];
+            if (lastCell) {
+              const badge = document.createElement('span');
+              badge.className = 'zac-fw-badge';
+              badge.textContent = row.dataset.framework;
+              badge.style.cssText = `display:inline-block; padding:2px 8px; border-radius:999px; background:${pal.bg}; color:${pal.text}; font-size:9px; margin-left:6px; font-weight:600;`;
+              lastCell.appendChild(badge);
+            }
+          }
+          // Apply filter (visual hide).
+          const rowFw = row.dataset.framework || '';
+          const rowTr = row.dataset.testRunner || '';
+          const fwOk = !fw || rowFw === fw;
+          const trOk = !tr || rowTr === tr;
+          row.style.display = (fwOk && trOk) ? '' : 'none';
+        });
+      });
+      window.zacRunsFilter = { framework: fw, testRunner: tr };
+    }
+
+    function inferTestRunner(framework) {
+      if (!framework) return '';
+      if (framework.includes('testng')) return 'testng';
+      if (framework.endsWith('-java'))  return 'junit';
+      if (framework.includes('cypress')) return 'mocha';
+      if (framework.includes('typescript') || framework.includes('javascript') || framework.includes('playwright')) return 'mocha';
+      return '';
+    }
+
+    fwSelect.addEventListener('change', tagAndPaintRows);
+    if (trSelect) trSelect.addEventListener('change', tagAndPaintRows);
+
+    // 6. CSV export — pulls real rerun history honouring current filters.
+    if (csvBtn) {
+      csvBtn.addEventListener('click', async () => {
+        try {
+          const r = await fetch('/api/runs/history?limit=500');
+          const data = await r.json();
+          if (!data.ok) {
+            showToast('CSV export failed: ' + (data.error || 'unknown'), 'error');
+            return;
+          }
+          const fw = fwSelect.value, tr = trSelect ? trSelect.value : '';
+          const rows = data.rows.filter(r => (!fw || r.framework === fw) && (!tr || r.test_runner === tr));
+          const cols = ['id', 'timestamp', 'project', 'framework', 'test_runner', 'status', 'duration_ms',
+                        'passed', 'failed', 'healed', 'heal_count', 'deliberate_heal_count', 'total_scenarios'];
+          const csv = [cols.join(',')]
+            .concat(rows.map(row => cols.map(c => `"${String(row[c] == null ? '' : row[c]).replace(/"/g, '""')}"`).join(',')))
+            .join('\n');
+          const blob = new Blob([csv], { type: 'text/csv' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `zac-runs-${new Date().toISOString().slice(0,10)}.csv`;
+          a.click();
+          URL.revokeObjectURL(url);
+          showToast(`Exported ${rows.length} run(s) to CSV`, 'success');
+          console.log('[ZAC-FIX] FIX 6: CSV exported', rows.length, 'rows');
+        } catch (e) {
+          showToast('CSV export failed: ' + e.message, 'error');
+        }
+      });
+    }
+
+    // 7. Run sync periodically (dashboard.js re-renders every load tick).
+    syncFrameworkOptions();
+    syncRunnerOptions();
+    tagAndPaintRows();
+    setInterval(() => { syncFrameworkOptions(); syncRunnerOptions(); tagAndPaintRows(); }, 4000);
+    // Also react when other panels broadcast a change.
+    window.addEventListener('zac-runs:changed', () => {
+      syncFrameworkOptions(); syncRunnerOptions(); tagAndPaintRows();
+    });
+    console.log('[ZAC-FIX] FIX 6 (rev2): filters wired into dashboard.js #filterFramework, runner select, real-data CSV');
+  }
+
+  /* ─────────────── FIX C — rerun → dashboard wiring ─────────────── */
+  function installRerunDashboardWiring() {
+    // Subscribe to the live rerun-completed snapshot via /api/dashboard/live
+    // purely to refresh the dashboard UI the moment a run lands.
+    //
+    // [ZAC-FIX] The durable rerun-history append USED to live here (mirroring
+    // the single-slot snapshot to /api/runs/append). That was lossy — it
+    // dropped completions that arrived faster than this poll, and recorded
+    // NOTHING when no dashboard tab was open (headless / CI / API reruns).
+    // History is now written authoritatively server-side in
+    // dashboardService.markRerunCompleted, so this poller only drives the UI.
+    const isDashboard = /dashboard\.html/.test(location.pathname);
+
+    let lastSeen = 0;
+    async function tick() {
+      try {
+        const r = await fetch('/api/dashboard/live');
+        if (!r.ok) return;
+        const snap = await r.json();
+        const lrc = snap && snap.lastRerunCompleted;
+        if (!lrc || !lrc.completedAt || lrc.completedAt <= lastSeen) return;
+        lastSeen = lrc.completedAt;
+        if (isDashboard) {
+          showToast('Rerun finished — refreshing dashboard', 'info', 1500);
+          window.dispatchEvent(new CustomEvent('zac-runs:changed'));
+        }
+        console.log('[ZAC-FIX] FIX C: rerun detected, dashboard refreshed', lrc);
+      } catch (e) { /* polling silently */ }
+    }
+    setInterval(tick, 4000);
+    console.log('[ZAC-FIX] FIX C: rerun → dashboard refresh running');
+  }
+
+  function installOrphanToggle() {
+    const cb = document.getElementById('zacOrphanToggle');
+    const label = document.getElementById('zacOrphanToggleLabel');
+    const counter = document.getElementById('zacOrphanCount');
+    if (!cb) return;
+
+    const STORE_KEY = 'zac.dashboard.includeOrphans';
+    cb.checked = localStorage.getItem(STORE_KEY) === 'true';
+    window.zacIncludeOrphans = cb.checked;
+
+    function tickCount() {
+      // [ZAC-FIX 2026-05-24] If the toggle is ON (showing orphans),
+      // there is nothing hidden — clear the counter immediately
+      // and skip the banner. Previously the counter kept its stale
+      // "(11 hidden runs)" text even after the user opted IN to
+      // show them, which was confusing.
+      if (cb.checked) {
+        if (counter) counter.textContent = '';
+        if (label)   label.title = 'Showing all projects (orphans included).';
+        const banner0 = document.getElementById('zac-hidden-runs-banner');
+        if (banner0) banner0.remove();
+        return;
+      }
+      // Pull a quick count of how many projects are hidden right now —
+      // makes the toggle informative even when off. Surfaces BOTH the
+      // project count AND the rerun count, because the more important
+      // signal for a confused user is "you have N reruns hidden".
+      fetch('/api/dashboard/stats?existingOnly=true').then(r => r.json()).then(d => {
+        const hiddenProjects = d?.summary?.orphansHidden || 0;
+        const hiddenReruns   = d?.summary?.hiddenReruns   || 0;
+        // Counter text — prefer rerun count since that's what users care about
+        let txt = '';
+        if (hiddenReruns > 0)        txt = `(${hiddenReruns} hidden run${hiddenReruns === 1 ? '' : 's'})`;
+        else if (hiddenProjects > 0) txt = `(${hiddenProjects} hidden project${hiddenProjects === 1 ? '' : 's'})`;
+        if (counter) counter.textContent = txt;
+        if (label) label.title = (hiddenProjects || hiddenReruns)
+          ? `${hiddenReruns} run${hiddenReruns === 1 ? '' : 's'} from ${hiddenProjects} orphan project${hiddenProjects === 1 ? '' : 's'} on disk are hidden by default. Tick to show them.`
+          : 'No orphan projects or reruns detected.';
+        // [ZAC-FIX 2026-05-24] Also paint a prominent banner above
+        // the dashboard so users SEE that data is being filtered out.
+        // Only shown when:
+        //   - filter is on (user is hiding things)
+        //   - hidden runs > 0 (there's actually something to surface)
+        //   - the visible reruns list is empty (otherwise the user has
+        //     plenty to see and a banner would be noise).
+        const visibleReruns = d?.summary?.totalReruns || 0;
+        let banner = document.getElementById('zac-hidden-runs-banner');
+        if (hiddenReruns > 0 && visibleReruns === 0) {
+          if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'zac-hidden-runs-banner';
+            banner.style.cssText =
+              'margin:10px 0 14px;padding:10px 14px;border:1px solid rgba(245,158,11,0.45);' +
+              'border-radius:6px;background:rgba(245,158,11,0.08);color:#f59e0b;' +
+              'display:flex;align-items:center;gap:10px;font-size:13px;';
+            const main = document.querySelector('.dashboard-main, main, .main') || document.body;
+            main.insertBefore(banner, main.firstChild);
+          }
+          banner.innerHTML =
+            `⚠️ <strong>${hiddenReruns} run${hiddenReruns === 1 ? '' : 's'} hidden</strong> ` +
+            `because the originating project${hiddenProjects === 1 ? '' : 's'} ` +
+            `${hiddenProjects === 1 ? 'is' : 'are'} no longer in <code>projects/</code>. ` +
+            `<button id="zac-show-hidden-runs" style="margin-left:auto;background:#f59e0b;color:#0c0f15;` +
+            `border:0;padding:6px 12px;border-radius:4px;font-weight:600;cursor:pointer;">Show all runs</button>`;
+          const btn = document.getElementById('zac-show-hidden-runs');
+          if (btn) btn.onclick = () => { cb.checked = true; cb.dispatchEvent(new Event('change')); };
+        } else if (banner) {
+          banner.remove();
+        }
+      }).catch(() => {});
+    }
+
+    cb.addEventListener('change', () => {
+      localStorage.setItem(STORE_KEY, String(cb.checked));
+      window.zacIncludeOrphans = cb.checked;
+      // Notify dashboard.js + framework projection to refresh.
+      window.dispatchEvent(new CustomEvent('zac-runs:changed'));
+      // Force the dashboard's load() if it's exposed.
+      try { if (typeof window.load === 'function') window.load(); } catch {}
+      showToast(cb.checked ? 'Showing all projects (incl. orphans)' : 'Showing only existing projects', 'info');
+      // [ZAC-FIX 2026-05-24] Re-run the count + banner refresh
+      // immediately so the "X hidden runs" banner disappears the
+      // instant the user clicks "Show all" instead of waiting for
+      // the 8s tick.
+      tickCount();
+    });
+
+    tickCount();
+    setInterval(tickCount, 8000);
+    console.log('[ZAC-FIX] orphan toggle installed; default:', cb.checked ? 'include' : 'hide');
+  }
+
+  function installFrameworkProjection() {
+    const host = document.getElementById('zac-fw-projection-host');
+    const totals = document.getElementById('zac-fw-projection-totals');
+    if (!host) return; // not on dashboard
+
+    const PALETTE = {
+      selenium:   { bg: 'rgba(29,78,216,0.18)',  text: '#bfdbfe', border: '#3b82f6' },
+      playwright: { bg: 'rgba(21,128,61,0.18)',  text: '#bbf7d0', border: '#22c55e' },
+      cypress:    { bg: 'rgba(180,83,9,0.18)',   text: '#fde68a', border: '#f59e0b' },
+    };
+    function paletteFor(framework) {
+      const family = String(framework || '').split('-')[0];
+      return PALETTE[family] || { bg: 'rgba(99,102,241,0.18)', text: '#c7d2fe', border: '#6366f1' };
+    }
+
+    function renderCard(row, liveFrameworks) {
+      const pal = paletteFor(row.framework);
+      const card = document.createElement('div');
+      card.className = 'zac-fw-card';
+      card.dataset.framework = row.framework;
+      const isLive = liveFrameworks.has(row.framework);
+      card.style.cssText = `padding:14px; border-radius:12px; background:${pal.bg}; border:1px solid ${pal.border}; color:${pal.text}; display:flex; flex-direction:column; gap:6px; position:relative;`;
+      const passRate = row.passRatePct == null ? '—' : (row.passRatePct + '%');
+      const lastRunText = row.lastRunAt
+        ? `${row.lastRunAt} · ${row.lastRun?.projectId || ''}/${row.lastRun?.testName || ''}`
+        : 'no runs yet';
+      card.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <div style="font-weight:700; font-size:14px;">${row.framework}</div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${isLive ? '<span title="rerun in flight" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#22c55e; box-shadow:0 0 0 0 rgba(34,197,94,0.6); animation:zac-pulse 1.4s infinite;"></span>' : ''}
+            <button type="button" data-zac-fw-filter="${row.framework}" style="font-size:10px; padding:2px 8px; border-radius:999px; border:1px solid currentColor; background:transparent; color:inherit; cursor:pointer;">Filter →</button>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; font-size:11px;">
+          <div><div style="opacity:0.7;">Projects</div><div style="font-weight:700; font-size:14px;">${row.projectCount}</div></div>
+          <div><div style="opacity:0.7;">Runs</div><div style="font-weight:700; font-size:14px;">${row.totalReruns}</div></div>
+          <div><div style="opacity:0.7;">Pass rate</div><div style="font-weight:700; font-size:14px;">${passRate}</div></div>
+          <div><div style="opacity:0.7;">Heals</div><div style="font-weight:700; font-size:14px;">${row.healed}</div></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; gap:8px; font-size:10px; opacity:0.85;">
+          <div>passed: <strong>${row.passed}</strong> · failed: <strong>${row.failed}</strong></div>
+          ${row.lastRun ? `<a href="/report.html?path=${encodeURIComponent(row.lastRun.reportPath)}" style="color:inherit; text-decoration:underline;">latest report →</a>` : ''}
+        </div>
+        <div title="${lastRunText}" style="font-size:10px; opacity:0.7; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:monospace;">${lastRunText}</div>
+      `;
+      return card;
+    }
+
+    function applyFilter(framework) {
+      const sel = document.getElementById('filterFramework');
+      if (sel) {
+        sel.value = framework;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      // Switch the sidebar nav to "Runs" so the user sees the filtered table.
+      const runsBtn = document.querySelector('[data-view="runs"], a[href="#runs"]');
+      if (runsBtn) runsBtn.click();
+      showToast('Filtered to ' + framework, 'info');
+    }
+
+    async function liveFrameworksInFlight() {
+      try {
+        const r = await fetch('/api/dashboard/live');
+        if (!r.ok) return new Set();
+        const snap = await r.json();
+        // The live snapshot's reruns/sessions don't currently carry the
+        // framework field for every entry. As a heuristic, surface the
+        // most-recently completed rerun's framework as "warm" even after
+        // it finishes — keeps the pulse visible briefly.
+        const fw = new Set();
+        if (snap.lastRerunCompleted && snap.lastRerunCompleted.framework
+            && Date.now() - (snap.lastRerunCompleted.completedAt || 0) < 8000) {
+          fw.add(snap.lastRerunCompleted.framework);
+        }
+        for (const item of (snap.reruns?.items || [])) {
+          if (item.framework) fw.add(item.framework);
+        }
+        for (const item of (snap.sessions?.items || [])) {
+          if (item.framework) fw.add(item.framework);
+        }
+        return fw;
+      } catch { return new Set(); }
+    }
+
+    async function refresh() {
+      try {
+        const includeOrphans = !!window.zacIncludeOrphans;
+        const url = '/api/dashboard/framework-summary' + (includeOrphans ? '?existingOnly=false' : '');
+        const [summaryRes, liveFw] = await Promise.all([
+          fetch(url).then(r => r.json()),
+          liveFrameworksInFlight(),
+        ]);
+        if (!summaryRes.ok) return;
+        host.innerHTML = '';
+        for (const row of summaryRes.frameworks) {
+          host.appendChild(renderCard(row, liveFw));
+        }
+        if (totals) {
+          const t = summaryRes.totals;
+          totals.textContent = `${t.frameworks} frameworks · ${t.projects} projects · ${t.reruns} runs · ${t.heals} heals`;
+        }
+        host.querySelectorAll('[data-zac-fw-filter]').forEach(btn => {
+          btn.addEventListener('click', () => applyFilter(btn.getAttribute('data-zac-fw-filter')));
+        });
+      } catch (e) {
+        host.innerHTML = `<div style="color:#f87171; font-size:12px;">Failed to load framework summary: ${e.message}</div>`;
+      }
+    }
+
+    // Inject the keyframe animation once.
+    if (!document.getElementById('zac-fw-pulse-style')) {
+      const style = document.createElement('style');
+      style.id = 'zac-fw-pulse-style';
+      style.textContent = '@keyframes zac-pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.7);} 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0);} 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0);} }';
+      document.head.appendChild(style);
+    }
+
+    refresh();
+    setInterval(refresh, 4000);
+    // Listen for the heal-clear and rerun-finished bumps so we react
+    // immediately rather than waiting for the next 4s tick.
+    window.addEventListener('zac-runs:changed', refresh);
+    console.log('[ZAC-FIX] Framework Projection panel armed');
+  }
+
+  function installClearLocatorsButton() {
+    const btn = document.getElementById('zacClearLocatorsBtn');
+    if (!btn) return; // not on dashboard
+    btn.addEventListener('click', async () => {
+      const fwFilter = (document.getElementById('filterFramework') || {}).value || '';
+      const pjFilter = (document.getElementById('filterProject')   || {}).value || '';
+      let scope;
+      const body = { confirm: true, includeRerunHistory: true };
+      if (pjFilter) {
+        body.projectId = pjFilter;
+        scope = `project "${pjFilter}"`;
+      } else if (fwFilter) {
+        body.framework = fwFilter;
+        scope = `every project under "${fwFilter}"`;
+      } else {
+        scope = 'EVERY project';
+      }
+      const summary =
+        `Clear heal data for ${scope}?\n\n` +
+        `This wipes:\n` +
+        `  • the Heal Log table (entries in healed-locators.json)\n` +
+        `  • the "Healing events" column on the snapshot above\n` +
+        `    (zeros healingHits in past rerun replay-result.json files)\n\n` +
+        `Pass / fail / duration history is preserved. This cannot be undone.`;
+      if (!window.confirm(summary)) return;
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '🗑 clearing…';
+      try {
+        const r = await fetch('/api/dashboard/clear-locators', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (data.ok) {
+          const msg = data.totalRerunHealsZeroed > 0
+            ? `Cleared ${data.totalCleared || 0} heal log(s) + zeroed ${data.totalRerunHealsZeroed} rerun heal counter(s)`
+            : `Cleared ${data.totalCleared || 0} heal log file(s)`;
+          showToast(msg, 'success');
+          // Trigger the existing dashboard refresh path. dashboard.js exposes
+          // both `load()` and `pollLive()` on window-scoped closures; call
+          // whatever's available.
+          ['load', 'pollLive', 'refreshStats'].forEach(fn => {
+            try { if (typeof window[fn] === 'function') window[fn](); } catch { /* ignore */ }
+          });
+          window.dispatchEvent(new CustomEvent('zac-runs:changed'));
+        } else {
+          showToast('Clear failed: ' + (data.error || 'unknown'), 'error');
+        }
+      } catch (e) {
+        showToast('Clear failed: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    });
+    console.log('[ZAC-FIX] Clear-locators button armed');
+  }
+
+  // [ZAC-FIX] Boot absorbed patches
+  try { installDashboardFilters(); }     catch (e) { console.error('[ZAC-FIX] FIX 6 failed', e); }
+  try { installRerunDashboardWiring(); } catch (e) { console.error('[ZAC-FIX] FIX C failed', e); }
+  try { installOrphanToggle(); }         catch (e) { console.error('[ZAC-FIX] orphan toggle failed', e); }
+  try { installFrameworkProjection(); }  catch (e) { console.error('[ZAC-FIX] framework projection failed', e); }
+  try { installClearLocatorsButton(); }  catch (e) { console.error('[ZAC-FIX] clear-locators failed', e); }

@@ -354,3 +354,200 @@
   loadServerInfo();
   loadEmailConfig();
   setInterval(loadServerInfo, 5_000); // light refresh
+
+  // [ZAC-FIX] Absorbed from public/zacFixes.js
+
+function installSettingsAiWiring() {
+    const ZAC = window.ZacSettings;
+  const endpoint   = document.getElementById('ollamaEndpoint');
+  const model      = document.getElementById('ollamaModel');
+  const enabled    = document.getElementById('ollamaEnabled');
+  const status     = document.getElementById('zacOllamaStatus');
+  const testBtn    = document.getElementById('zacOllamaTestBtn');
+  const saveBtn    = document.getElementById('zacOllamaSaveBtn');
+  let aiToggle     = document.getElementById('aiToggle'); // legacy "Local AI Engine" switch (will be re-bound after clone below)
+  if (!ZAC) return;
+  if (!endpoint && !aiToggle) return; // not on a settings-bearing page
+
+  if (endpoint) ZAC.bindInput('ollamaEndpoint', 'ollamaEndpoint', { event: 'change' });
+  if (model)    ZAC.bindInput('ollamaModel',    'ollamaModel',    { event: 'change' });
+
+  // Re-entrancy guard so syncing one checkbox to the other doesn't echo
+  // back into POST /api/ai/toggle.
+  let suppressToggleEffects = false;
+
+  function setBothCheckboxes(isOn) {
+    suppressToggleEffects = true;
+    try {
+      if (enabled  && enabled.checked  !== isOn) enabled.checked  = isOn;
+      // [ZAC-FIX 2026-05-24] Always look the legacy checkbox up by ID
+      // here — the clone-and-replace below makes any cached `aiToggle`
+      // closure variable point at a detached node, so writes silently
+      // missed the live DOM. Looking it up fresh costs ~microseconds
+      // and means the cross-tab sync always lands on the visible
+      // checkbox.
+      const liveAi = document.getElementById('aiToggle');
+      if (liveAi && liveAi.checked !== isOn) liveAi.checked = isOn;
+      // ZacSettings store mirrors too — single source of truth in localStorage.
+      if (ZAC.get().ollamaEnabled !== isOn) ZAC.set({ ollamaEnabled: isOn });
+    } finally {
+      suppressToggleEffects = false;
+    }
+  }
+
+  async function refreshFromServer(reason) {
+    try {
+      const r = await fetch('/api/ai/info', { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) return;
+      const info = await r.json();
+      setBothCheckboxes(!!info.available);
+      // Mirror server-known model + baseUrl into the panel inputs.
+      const patch = {};
+      if (info.model   && info.model   !== ZAC.get().ollamaModel)    patch.ollamaModel    = info.model;
+      if (info.baseUrl && info.baseUrl !== ZAC.get().ollamaEndpoint) patch.ollamaEndpoint = info.baseUrl;
+      if (Object.keys(patch).length) ZAC.set(patch);
+      if (status && reason === 'boot') {
+        status.textContent = info.available
+          ? `✓ ${info.provider}/${info.model} ready`
+          : 'idle';
+        status.className = 'status ' + (info.available ? 'ok' : '');
+      }
+      // [ZAC-FIX 2026-05-24] Broadcast a same-tab event so EVERY AI
+      // status display re-renders without a page reload. The four
+      // consumers (top-bar AI badge in app-tabs.js, dashboard's
+      // #aiToggleBtn, the floating AI panel in aiAssistant.js, and
+      // anything else that subscribes) listen for this and refresh
+      // their UI from `info` directly. Cross-tab sync still works
+      // through ZacSettings + the storage event.
+      try {
+        window.dispatchEvent(new CustomEvent('zac:ai-state-changed', {
+          detail: { info, reason: reason || 'unknown', at: Date.now() },
+        }));
+      } catch (_) { /* CustomEvent should always be present in modern browsers */ }
+    } catch (_) { /* silent — leave UI as-is */ }
+  }
+
+  async function callServerToggle(targetOn, originEl) {
+    try {
+      const r = await fetch('/api/ai/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: targetOn ? 'on' : 'off' }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (targetOn && !data.ok) {
+        // Server said no — bounce both checkboxes back to off and surface why.
+        setBothCheckboxes(false);
+        showToast(data.reason || 'Could not enable AI on the server', 'error', 3000);
+        return false;
+      }
+      // Always reconcile from server after a successful toggle so the
+      // model/baseUrl labels also catch up.
+      await refreshFromServer('toggle');
+      showToast(targetOn ? 'AI enabled' : 'AI disabled', targetOn ? 'success' : 'info');
+      return true;
+    } catch (e) {
+      // Roll back the checkbox the user just flipped.
+      if (originEl) originEl.checked = !originEl.checked;
+      setBothCheckboxes(!!originEl?.checked);
+      showToast('Toggle failed: ' + (e.message || e), 'error', 3000);
+      return false;
+    }
+  }
+
+  // Wire ollamaEnabled — if it's present on this page.
+  if (enabled) {
+    enabled.addEventListener('change', async (e) => {
+      if (suppressToggleEffects) return;
+      await callServerToggle(!!e.currentTarget.checked, e.currentTarget);
+    });
+  }
+
+  // Wire aiToggle (legacy) — re-issue the same server toggle so we route
+  // through one code path. We replace its prior listeners with a clone so
+  // the legacy settings.js handler doesn't double-fire.
+  if (aiToggle) {
+    const fresh = aiToggle.cloneNode(true);
+    aiToggle.parentNode.replaceChild(fresh, aiToggle);
+    fresh.addEventListener('change', async (e) => {
+      if (suppressToggleEffects) return;
+      await callServerToggle(!!e.currentTarget.checked, e.currentTarget);
+      // Keep the legacy "✓ on — provider: …" label in sync if it exists.
+      const legacyStatus = document.getElementById('aiStatus');
+      if (legacyStatus) {
+        try {
+          const info = await (await fetch('/api/ai/info')).json();
+          if (info.available) {
+            legacyStatus.textContent = `✓ on — provider: ${info.provider}, model: ${info.model}, base: ${info.baseUrl}`;
+            legacyStatus.className = 'status ok';
+            const hint = document.getElementById('aiInstallHint');
+            if (hint) hint.style.display = 'none';
+          } else {
+            legacyStatus.textContent = `off — ${info.reason || 'no AI provider configured'}`;
+            legacyStatus.className = 'status warn';
+          }
+        } catch { /* ignore */ }
+      }
+    });
+  }
+
+  // Cross-tab + same-tab sync via ZacSettings — when ollamaEnabled changes
+  // somewhere else (another tab, the AI panel), reflect it on these checkboxes.
+  ZAC.subscribe((s, change) => {
+    if (!change || change.initial || change.crossTab !== true) return;
+    setBothCheckboxes(!!s.ollamaEnabled);
+    // [ZAC-FIX 2026-05-24] Cross-tab AI toggle: re-pull the live
+    // /api/ai/info (storage doesn't carry the model/baseUrl) and
+    // broadcast for the in-tab listeners to refresh.
+    refreshFromServer('cross-tab');
+  });
+
+  refreshFromServer('boot');
+
+  if (testBtn) {
+    testBtn.addEventListener('click', async () => {
+      if (!status) return;
+      status.textContent = 'connecting…';
+      status.className = 'status';
+      try {
+        // [ZAC-FIX] FIX 8 — go through the server's /api/ai/info instead of
+        // hitting Ollama directly from the browser (CORS would block it).
+        const r = await fetch('/api/ai/info');
+        if (!r.ok) throw new Error('ZAC server HTTP ' + r.status);
+        const info = await r.json();
+        if (info.available) {
+          const wantedModel = ZAC.get().ollamaModel;
+          const modelMatch = !wantedModel || !info.model || info.model === wantedModel;
+          status.textContent = modelMatch
+            ? `✓ Connected — ${info.provider}/${info.model} @ ${info.baseUrl}`
+            : `Connected — server has model "${info.model}" but panel asks for "${wantedModel}"`;
+          status.className = 'status ' + (modelMatch ? 'ok' : 'warn');
+        } else {
+          status.textContent = '✗ ' + (info.reason || 'AI not configured on the ZAC server');
+          status.className = 'status error';
+        }
+      } catch (e) {
+        status.textContent = '✗ Error: ' + (e.message || e);
+        status.className = 'status error';
+      }
+    });
+  }
+  if (saveBtn) {
+    saveBtn.addEventListener('click', () => {
+      ZAC.set({
+        ollamaEndpoint: endpoint.value.trim(),
+        ollamaModel: model.value.trim(),
+        ollamaEnabled: enabled ? !!enabled.checked : ZAC.get().ollamaEnabled,
+      });
+      if (status) {
+        const prev = status.textContent;
+        status.textContent = 'Saved ✓';
+        status.className = 'status ok';
+        setTimeout(() => { if (status.textContent === 'Saved ✓') status.textContent = prev || 'idle'; }, 2000);
+      }
+    });
+  }
+}
+
+  // [ZAC-FIX] Boot absorbed patches
+  try { installSettingsAiWiring(); } catch (e) { console.error('[ZAC-FIX] settings AI wiring failed', e); }
