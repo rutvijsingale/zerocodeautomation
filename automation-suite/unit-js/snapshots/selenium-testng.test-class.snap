@@ -1,0 +1,111 @@
+import io.github.bonigarcia.wdm.WebDriverManager;
+import org.openqa.selenium.By;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WebElement;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
+import org.openqa.selenium.firefox.FirefoxDriver;
+import org.openqa.selenium.firefox.FirefoxOptions;
+import org.openqa.selenium.remote.RemoteWebDriver;
+import org.openqa.selenium.safari.SafariDriver;
+import org.openqa.selenium.safari.SafariOptions;
+import org.testng.Assert;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
+import support.BasePage;
+import support.CredentialsHelper;
+import support.Locators;
+import java.net.URL;
+
+public class RecordedTestFlowTest {
+  private WebDriver driver;
+  private BasePage page;
+
+  /** Pick browser via ZAC_BROWSER env or zac.browser system property; default chrome. */
+  private static String resolveBrowserType() {
+    String env = System.getenv("ZAC_BROWSER");      if (env  != null && !env.isEmpty())  return env;
+    String prop= System.getProperty("zac.browser"); if (prop != null && !prop.isEmpty()) return prop;
+    return "chrome";
+  }
+  /** Hub URL via SELENIUM_HUB_URL env or zac.seleniumHubUrl property; null = local. */
+  private static String resolveHubUrl() {
+    String env = System.getenv("SELENIUM_HUB_URL");        if (env  != null && !env.isEmpty())  return env;
+    String prop= System.getProperty("zac.seleniumHubUrl"); if (prop != null && !prop.isEmpty()) return prop;
+    return null;
+  }
+
+  @BeforeMethod
+  public void setUp() throws Exception {
+    String browserType = resolveBrowserType();
+    String hubUrl      = resolveHubUrl();
+    ChromeOptions chromeOpts   = new ChromeOptions();
+    chromeOpts.addArguments("--start-maximized");
+    chromeOpts.addArguments("--disable-blink-features=AutomationControlled");
+    FirefoxOptions firefoxOpts = new FirefoxOptions();
+    SafariOptions  safariOpts  = new SafariOptions();
+    if (hubUrl != null) {
+      // ── Selenium Grid path ──
+      System.out.println("[TestNG] Using Grid: " + hubUrl + " (browser=" + browserType + ")");
+      switch (browserType.toLowerCase()) {
+        case "firefox": driver = new RemoteWebDriver(new URL(hubUrl), firefoxOpts); break;
+        case "safari":  driver = new RemoteWebDriver(new URL(hubUrl), safariOpts);  break;
+        default:        driver = new RemoteWebDriver(new URL(hubUrl), chromeOpts);  break;
+      }
+    } else {
+      // ── Local driver path (WebDriverManager auto-resolves binaries) ──
+      switch (browserType.toLowerCase()) {
+        case "firefox": WebDriverManager.firefoxdriver().setup(); driver = new FirefoxDriver(firefoxOpts); break;
+        case "safari":  driver = new SafariDriver(safariOpts); break;
+        default:        WebDriverManager.chromedriver().setup(); driver = new ChromeDriver(chromeOpts); break;
+      }
+    }
+    try { driver.manage().window().maximize(); } catch (Exception ignored) { /* not all grid nodes support */ }
+    page = new BasePage(driver);
+  }
+
+  @AfterMethod
+  public void tearDown(org.testng.ITestResult result) {
+    try {
+      if (result != null && result.getStatus() == org.testng.ITestResult.FAILURE && driver != null) {
+        byte[] png = ((org.openqa.selenium.TakesScreenshot) driver)
+            .getScreenshotAs(org.openqa.selenium.OutputType.BYTES);
+        java.nio.file.Path dir = java.nio.file.Paths.get("target", "screenshots");
+        java.nio.file.Files.createDirectories(dir);
+        String safe = result.getName().replaceAll("[^A-Za-z0-9._-]+", "_");
+        String ts = String.valueOf(System.currentTimeMillis());
+        java.nio.file.Path out = dir.resolve("failure-" + safe + "-" + ts + ".png");
+        java.nio.file.Files.write(out, png);
+        System.err.println("[ZAC] Failure screenshot saved: " + out.toAbsolutePath());
+      }
+    } catch (Exception e) {
+      System.err.println("[ZAC] Failure-screenshot capture failed: " + e.getMessage());
+    } finally {
+      if (driver != null) driver.quit();
+    }
+  }
+
+  @Test(description = "Recorded flow → RecordedTestFlow")
+  public void testRecordedTestFlow() {
+    driver.get("https://example.com");
+    driver.get("https://example.com");
+    {
+      WebElement e = page.findWithHealing(Locators.CHAINS.get("submit_button"));
+      e.click();
+    }
+    {
+      WebElement e = page.findWithHealing(Locators.CHAINS.get("email_field"));
+      String resolved = CredentialsHelper.resolve("test@example.com");
+      e.clear();
+      e.sendKeys(resolved);
+    }
+    {
+      WebElement e = page.findWithHealing(Locators.CHAINS.get("result"));
+      Assert.assertTrue(e.getText().contains("Success"), "expected text not found");
+    }
+    {
+      WebElement e = page.findWithHealing(Locators.CHAINS.get("loading_spinner")); // explicit wait for element
+      org.testng.Assert.assertNotNull(e, "waitForSelector: element never appeared");
+    }
+  }
+}

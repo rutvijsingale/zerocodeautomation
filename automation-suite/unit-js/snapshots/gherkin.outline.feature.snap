@@ -1,0 +1,15 @@
+@recorded
+Feature: Outline Feature
+
+  @recorded
+  Scenario Outline: Parameterized Scenario
+    Given I navigate to "https://example.com"
+    When I click "Submit Button"
+    And I type "test@example.com" into "Email Field"
+    Then I should see "Success" in "#result"
+    And I wait for selector "#loading"
+
+    Examples:
+      | email |
+      | user1@example.com |
+      | user2@example.com |
